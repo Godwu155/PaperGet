@@ -1,0 +1,1 @@
+"""PDF source adapters."""
