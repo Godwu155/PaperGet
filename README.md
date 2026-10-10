@@ -12,6 +12,8 @@ python -m venv .venv
 .venv\Scripts\paperget --help
 ```
 
+若本机 Python 的 `venv`/`ensurepip` 不可用，也可用 `uv venv .venv`、`uv pip install --python .venv\Scripts\python.exe .` 安装。
+
 OpenAlex 允许少量匿名查询；批量使用建议申请免费 API key。以下环境变量仅对当前 PowerShell 会话生效：
 
 ```powershell

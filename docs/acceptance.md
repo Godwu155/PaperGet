@@ -13,4 +13,4 @@
 | 限流与禁止 | 模拟 429、403 | 429 按 `Retry-After` 重试；403 立即停止该主机的后续候选。 |
 | 批量继续与导出 | 三行 TXT：有效 DOI、Crossref 坏 JSON 的标题、重复 DOI | 依次得到 `downloaded`、`failed`、`existing`；报告和 SQLite 导出仍可读。 |
 
-本机系统 Python 的 `ensurepip` 无法建立全新虚拟环境，因此本机无法完成该环境下的安装门槛。已用现有 Python 将项目打成 wheel，并从 wheel 导入执行 CLI；标准自动化测试 20 项通过。建议在另一台正常配置的 Windows Python 3.11+ 环境执行 README 的安装步骤。
+本机系统 Python 的 `ensurepip` 无法建立虚拟环境，因此改用 `uv venv` 基于 Python 3.12.14 创建全新环境，并通过 `uv pip install .` 安装项目及 `requests` 依赖；该环境中的 `paperget.exe --help` 成功运行。另已构建 wheel 并从 wheel 执行 CLI。标准自动化测试 20 项通过。
