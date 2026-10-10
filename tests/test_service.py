@@ -1,0 +1,122 @@
+import tempfile
+import unittest
+import sqlite3
+from pathlib import Path
+
+from paperget.config import Config
+from paperget.errors import PaperGetError
+from paperget.service import PaperGetService
+
+
+DOI = "10.1371/journal.pone.0000001"
+
+
+class Response:
+    status_code = 200
+
+    def __init__(self, url, *, data=None, body=b""):
+        self.url = url
+        self.data = data
+        self.body = body
+        self.headers = {"Content-Type": "application/pdf" if body else "application/json"}
+
+    def json(self):
+        return self.data
+
+    def iter_content(self, chunk_size):
+        yield self.body
+
+    def close(self):
+        pass
+
+
+class Http:
+    def __init__(self, *, block_first=False):
+        self.calls = []
+        self.block_first = block_first
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        if "api.crossref.org" in url:
+            return Response(url, data={"message": {"DOI": DOI, "title": ["Example paper"]}})
+        if "api.openalex.org" in url:
+            locations = [
+                {"is_oa": True, "pdf_url": "https://example.org/first.pdf", "version": "submittedVersion"},
+                {"is_oa": True, "pdf_url": "https://mirror.example.net/second.pdf", "version": "publishedVersion"},
+            ]
+            return Response(url, data={"best_oa_location": locations[0], "locations": locations})
+        if url.endswith("first.pdf") and self.block_first:
+            raise PaperGetError("forbidden", "HTTP 403")
+        return Response(url, body=b"%PDF-1.7\nexample content")
+
+
+class ServiceTests(unittest.TestCase):
+    def test_fallback_and_existing_file(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            http = Http(block_first=True)
+            with PaperGetService(Config(output_dir=Path(directory)), http=http) as service:
+                result = service.fetch(DOI)
+                self.assertEqual((result.status, result.source), ("downloaded", "openalex"))
+                self.assertTrue(result.path.is_file())
+                self.assertEqual(result.path.read_bytes()[:5], b"%PDF-")
+                before = len(http.calls)
+                again = service.fetch(DOI)
+                self.assertEqual(again.status, "existing")
+                self.assertEqual(again.source, "openalex")
+                self.assertEqual(len(http.calls), before)
+                attempts = service.store.connection.execute("SELECT status FROM attempts ORDER BY id").fetchall()
+                self.assertEqual([row[0] for row in attempts], ["failed", "downloaded"])
+
+    def test_inspect_uses_metadata_cache_and_does_not_download(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            http = Http()
+            with PaperGetService(Config(output_dir=Path(directory)), http=http) as service:
+                for _ in range(2):
+                    result = service.fetch(DOI, inspect=True)
+                    self.assertEqual(result.status, "found")
+                    self.assertEqual(len(result.candidates), 2)
+                self.assertEqual(len(http.calls), 2)
+                self.assertFalse(list(Path(directory).glob("*.pdf")))
+
+    def test_forbidden_is_reported_without_pdf(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            http = Http(block_first=True)
+            with PaperGetService(Config(output_dir=Path(directory), prefer_published=False), http=http) as service:
+                http.block_first = True
+                # Make every candidate unavailable, including the second one.
+                original = http.get
+
+                def denied(url, **kwargs):
+                    if url.endswith(".pdf"):
+                        raise PaperGetError("forbidden", "HTTP 403")
+                    return original(url, **kwargs)
+
+                http.get = denied
+                result = service.fetch(DOI)
+                self.assertEqual((result.status, result.error_code), ("failed", "forbidden"))
+                self.assertFalse(list(Path(directory).glob("*.pdf")))
+
+    def test_published_version_is_tried_first_when_requested(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            http = Http(block_first=True)
+            with PaperGetService(Config(output_dir=Path(directory), prefer_published=True), http=http) as service:
+                result = service.fetch(DOI)
+                self.assertEqual(result.status, "downloaded")
+                self.assertEqual(result.version, "publishedVersion")
+                self.assertNotIn("https://example.org/first.pdf", http.calls)
+
+    def test_database_write_failure_does_not_lose_download(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with PaperGetService(Config(output_dir=Path(directory)), http=Http()) as service:
+                def unavailable(_result):
+                    raise sqlite3.OperationalError("read only")
+
+                service.store.save = unavailable
+                result = service.fetch(DOI)
+                self.assertEqual(result.status, "downloaded")
+                self.assertTrue(result.path.is_file())
+                self.assertIn("database unavailable", result.message.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()

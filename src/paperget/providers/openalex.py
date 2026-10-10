@@ -4,28 +4,34 @@ from urllib.parse import quote
 
 from ..http import HttpClient
 from ..models import Candidate, Paper
+from ..store import Store
 
 
 class OpenAlexProvider:
     name = "openalex"
 
-    def __init__(self, http: HttpClient, api_key: str | None = None):
+    def __init__(self, http: HttpClient, api_key: str | None = None, cache: Store | None = None):
         self.http = http
         self.api_key = api_key
+        self.cache = cache
 
     def find(self, paper: Paper) -> list[Candidate]:
-        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
-        response = self.http.get(
-            f"https://api.openalex.org/works/doi:{quote(paper.doi, safe='/')}",
-            params={"select": "doi,title,best_oa_location,locations"},
-            headers=headers,
-        )
-        try:
-            if response.status_code == 404:
-                return []
-            work = response.json()
-        finally:
-            response.close()
+        work = self.cache.cached("openalex", paper.doi) if self.cache else None
+        if work is None:
+            headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
+            response = self.http.get(
+                f"https://api.openalex.org/works/doi:{quote(paper.doi, safe='/')}",
+                params={"select": "doi,title,best_oa_location,locations"},
+                headers=headers,
+            )
+            try:
+                if response.status_code == 404:
+                    return []
+                work = response.json()
+            finally:
+                response.close()
+            if self.cache:
+                self.cache.cache("openalex", paper.doi, work)
         locations = [work.get("best_oa_location"), *(work.get("locations") or [])]
         seen: set[str] = set()
         candidates: list[Candidate] = []

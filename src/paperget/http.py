@@ -36,9 +36,12 @@ class HttpClient:
                 )
             except (requests.Timeout, requests.ConnectionError) as exc:
                 if attempt == retries:
-                    raise PaperGetError("timeout", str(exc)) from exc
+                    code = "timeout" if isinstance(exc, requests.Timeout) else "connection_error"
+                    raise PaperGetError(code, str(exc)) from exc
                 time.sleep(min(2**attempt + random.random(), 30))
                 continue
+            except requests.RequestException as exc:
+                raise PaperGetError("connection_error", str(exc)) from exc
 
             if response.status_code in {429, 500, 502, 503, 504}:
                 if attempt == retries:

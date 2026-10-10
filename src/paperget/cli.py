@@ -3,22 +3,30 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
 from .config import Config
 from .models import Paper, Result
 from .service import PaperGetService
+from .store import Store
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="paperget", description="Find and download research papers by DOI or title")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("get", "batch", "inspect"):
+    for command in ("get", "batch", "inspect", "export"):
         entry = sub.add_parser(command)
+        if command == "export":
+            entry.add_argument("--output", type=Path, default=Path("downloads"))
+            entry.add_argument("--format", choices=("json", "csv"), default="json")
+            entry.add_argument("--file", type=Path, help="Output report path (default: output directory)")
+            continue
         if command == "batch":
             entry.add_argument("file", type=Path, help="UTF-8 TXT or CSV input")
             entry.add_argument("--column", default="doi_or_title", help="CSV column containing a DOI or title")
+            entry.add_argument("--report", type=Path, help="Write this batch's results to JSON or CSV")
         else:
             entry.add_argument("query", nargs="?", help="DOI or title")
             entry.add_argument("--title", help="Explicitly provide a paper title")
@@ -45,6 +53,8 @@ def _choose(papers: list[Paper]) -> int | None:
 
 
 def _queries(file: Path, column: str):
+    if file.suffix.lower() not in {".txt", ".csv"}:
+        raise ValueError("input file must be .txt or .csv")
     if file.suffix.lower() == ".csv":
         with file.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream)
@@ -76,11 +86,36 @@ def _print(result: Result, as_json: bool) -> None:
             print(f"  {candidate.source} {candidate.version or 'unknown version'} {candidate.url}")
 
 
+def _write_report(path: Path, rows: list[dict], format: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if format == "json":
+        path.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    else:
+        fields = ["query", "doi", "title", "status", "path", "source", "version", "sha256", "error_code", "message"]
+        with path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "export":
+        path = args.file or args.output / f"paperget-results.{args.format}"
+        database = args.output / "paperget.sqlite3"
+        if not database.is_file():
+            parser.error(f"result database not found: {database}")
+        try:
+            with Store(database) as store:
+                _write_report(path, store.export_json(), args.format)
+        except (OSError, sqlite3.Error) as exc:
+            parser.error(str(exc))
+        print(path)
+        return 0
     source_order = tuple(s.strip() for s in args.source_order.split(",") if s.strip())
-    if not source_order or any(s not in {"openalex", "scihub"} for s in source_order):
+    if not source_order or len(set(source_order)) != len(source_order) or any(s not in {"openalex", "scihub"} for s in source_order):
         parser.error("--source-order must contain openalex and/or scihub")
     if args.command != "batch":
         if bool(args.query) == bool(args.title):
@@ -93,11 +128,15 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         if not queries:
             parser.error("input file has no queries")
+        if args.report and args.report.suffix.lower() not in {".json", ".csv"}:
+            parser.error("--report must end in .json or .csv")
     config = Config.from_env(
         output_dir=args.output, source_order=source_order,
         prefer_published=args.prefer_published, force=args.force,
         non_interactive=args.non_interactive or args.command == "batch" or not sys.stdin.isatty(),
     )
+    if source_order == ("scihub",) and not config.scihub_base_url:
+        parser.error("SCIHUB_BASE_URL is required when Sci-Hub is the only source")
     results: list[Result] = []
     with PaperGetService(config) as service:
         for query in queries:
@@ -107,6 +146,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             results.append(result)
             _print(result, args.json)
+    if args.command == "batch":
+        try:
+            if args.report:
+                _write_report(args.report, [result.to_dict() for result in results], args.report.suffix.lower()[1:])
+            ambiguous = [result.to_dict() for result in results if result.status == "ambiguous"]
+            if ambiguous:
+                _write_report(args.output / "needs-review.json", ambiguous, "json")
+        except OSError as exc:
+            print(f"Failed to write report: {exc}", file=sys.stderr)
+            return 1
     successes = {"downloaded", "existing", "found"}
     ok = sum(result.status in successes for result in results)
     return 0 if ok == len(results) else 3 if ok == 0 else 1

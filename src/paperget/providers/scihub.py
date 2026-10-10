@@ -1,32 +1,59 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse, urlsplit
 
 from ..errors import PaperGetError
 from ..http import HttpClient
 from ..models import Candidate, Paper
+from ..resolver import normalize_doi
 
 
 class _PdfLinks(HTMLParser):
     def __init__(self):
         super().__init__()
         self.links: list[str] = []
+        self._hidden: list[bool] = []
+        self._citation: list[bool] = []
+        self.citation: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
+        style = (attributes.get("style") or "").replace(" ", "").lower()
+        hidden = bool(self._hidden and self._hidden[-1]) or (
+            attributes.get("id") == "minu"
+            or "hidden" in attributes
+            or attributes.get("aria-hidden") == "true"
+            or "display:none" in style
+            or "visibility:hidden" in style
+        )
+        if tag not in {"area", "base", "br", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"}:
+            self._hidden.append(hidden)
+            self._citation.append(attributes.get("id") == "citation" or bool(self._citation and self._citation[-1]))
+        if hidden:
+            return
         if tag in {"iframe", "embed"}:
             value = attributes.get("src")
         elif tag == "object":
             value = attributes.get("data")
         elif tag == "a":
             value = attributes.get("href")
-            if value and ".pdf" not in value.lower() and "download" not in attributes.get("id", "").lower():
-                value = None
         else:
             value = None
-        if value:
+        if value and (
+            urlsplit(value).path.lower().endswith(".pdf")
+            or (tag != "a" and (attributes.get("id") == "pdf" or attributes.get("type") == "application/pdf"))
+        ):
             self.links.append(value)
+
+    def handle_endtag(self, tag):
+        if tag not in {"area", "base", "br", "embed", "hr", "img", "input", "link", "meta", "source", "wbr"} and self._hidden:
+            self._hidden.pop()
+            self._citation.pop()
+
+    def handle_data(self, data):
+        if self._citation and self._citation[-1]:
+            self.citation.append(data)
 
 
 class SciHubProvider:
@@ -57,11 +84,14 @@ class SciHubProvider:
         finally:
             response.close()
         links: list[Candidate] = []
+        citation_doi = normalize_doi(" ".join(parser.citation))
+        if citation_doi and citation_doi != paper.doi.lower():
+            return []
         seen: set[str] = set()
         for raw in parser.links:
             candidate_url = urljoin(page_url, raw)
             parsed = urlparse(candidate_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname or candidate_url in seen:
+            if parsed.scheme != "https" or not parsed.hostname or candidate_url in seen:
                 continue
             seen.add(candidate_url)
             links.append(Candidate(url=candidate_url, source=self.name, landing_page_url=page_url))

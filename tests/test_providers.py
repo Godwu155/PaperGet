@@ -1,8 +1,9 @@
 import unittest
+from pathlib import Path
 
 from paperget.models import Paper
 from paperget.providers.openalex import OpenAlexProvider
-from paperget.providers.scihub import _PdfLinks
+from paperget.providers.scihub import SciHubProvider, _PdfLinks
 
 
 class Response:
@@ -38,3 +39,41 @@ class ProviderTests(unittest.TestCase):
         parser = _PdfLinks()
         parser.feed('<iframe src="//example.org/article.pdf"></iframe><a href="/about">About</a>')
         self.assertEqual(parser.links, ["//example.org/article.pdf"])
+
+    def test_scihub_ignores_ads_and_hidden_template_links(self):
+        parser = _PdfLinks()
+        parser.feed((Path(__file__).parent / "fixtures" / "scihub_available.html").read_text(encoding="utf-8"))
+        self.assertEqual(parser.links, ["https://sci.bban.top/pdf/10.1128/AEM.01532-09.pdf"])
+
+    def test_scihub_unavailable_page_has_no_candidate(self):
+        class Page:
+            status_code = 200
+            headers = {"Content-Type": "text/html"}
+            url = "https://sci-hub.al/10.1234/absent"
+            text = (Path(__file__).parent / "fixtures" / "scihub_unavailable.html").read_text(encoding="utf-8")
+
+            def close(self):
+                pass
+
+        class Site:
+            def get(self, *_args, **_kwargs):
+                return Page()
+
+        found = SciHubProvider(Site(), "https://sci-hub.al/").find(Paper("10.1234/absent"))
+        self.assertEqual(found, [])
+
+    def test_scihub_rejects_page_for_different_doi(self):
+        class Page:
+            status_code = 200
+            headers = {"Content-Type": "text/html"}
+            url = "https://sci-hub.al/10.1234/requested"
+            text = '<div id="citation">doi:10.1234/different</div><embed id="pdf" src="https://example.org/paper.pdf">'
+
+            def close(self):
+                pass
+
+        class Site:
+            def get(self, *_args, **_kwargs):
+                return Page()
+
+        self.assertEqual(SciHubProvider(Site(), "https://sci-hub.al/").find(Paper("10.1234/requested")), [])

@@ -17,7 +17,7 @@ def pdf_is_valid(path: Path) -> bool:
         if path.stat().st_size < 8:
             return False
         with path.open("rb") as file:
-            return b"%PDF-" in file.read(1024)
+            return file.read(5) == b"%PDF-"
     except OSError:
         return False
 
@@ -68,7 +68,7 @@ class Downloader:
                         first.extend(chunk[: 1024 - len(first)])
                     digest.update(chunk)
                     file.write(chunk)
-            if size < 8 or b"%PDF-" not in first:
+            if size < 8 or not first.startswith(b"%PDF-"):
                 raise PaperGetError("invalid_pdf", "Response was not a PDF")
             os.replace(temp, destination)
             temp = None
@@ -80,7 +80,10 @@ class Downloader:
         finally:
             response.close()
             if temp is not None:
-                temp.unlink(missing_ok=True)
+                try:
+                    temp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _hash(path: Path) -> str:

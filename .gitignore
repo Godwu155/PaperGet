@@ -7,6 +7,7 @@ __pycache__/
 dist/
 build/
 downloads/
+.tmp/
 *.part
 paperget.sqlite3
 paperget.sqlite3-*

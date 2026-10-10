@@ -1,0 +1,16 @@
+# PaperGet v0.1 验收样本
+
+验收日期：2026-10-10。实站结果仅说明当时的网络与站点状态，重跑可能变化。测试文件保存在本地忽略目录 `.tmp/`，不提交论文 PDF。
+
+| 场景 | 输入或模拟条件 | 预期及观测 |
+| --- | --- | --- |
+| 开放获取 DOI | `10.1371/journal.pone.0000001` | OpenAlex 提供 PLOS PDF；完整下载成功，816,502 字节，文件头 `%PDF-`；重复运行返回 `existing`。 |
+| 标题检索 | `Neural Substrate of Cold-Seeking Behavior in Endotoxin Shock` | Crossref 解析到上述 DOI，并可列出开放候选。 |
+| Sci-Hub 页面及 PDF | `10.1128/AEM.01532-09`，入口 `https://sci-hub.al/` | `GET /{doi}` 找到嵌入的 PDF；完整 GET 下载成功，1,046,802 字节；`pdftotext` 核对首页 DOI 和标题一致。此文自身为开放获取论文，不代表其他 DOI 可用。 |
+| 开放来源失败后回退 | 同上，OpenAlex 候选返回 403 | 继续尝试 Sci-Hub 候选并下载成功。 |
+| 标题歧义 | 模拟两个高相似候选 | 非交互模式返回 `ambiguous_title`，不静默选择。 |
+| 错误页面与中断 | 模拟 HTML 伪装 PDF、传输中断 | 不留下目标 PDF 或 `.part` 文件，可尝试下一候选。 |
+| 限流与禁止 | 模拟 429、403 | 429 按 `Retry-After` 重试；403 立即停止该主机的后续候选。 |
+| 批量继续与导出 | 三行 TXT：有效 DOI、Crossref 坏 JSON 的标题、重复 DOI | 依次得到 `downloaded`、`failed`、`existing`；报告和 SQLite 导出仍可读。 |
+
+本机系统 Python 的 `ensurepip` 无法建立全新虚拟环境，因此本机无法完成该环境下的安装门槛。已用现有 Python 将项目打成 wheel，并从 wheel 导入执行 CLI；标准自动化测试 20 项通过。建议在另一台正常配置的 Windows Python 3.11+ 环境执行 README 的安装步骤。

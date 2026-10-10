@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import requests
+
 from paperget.downloader import Downloader, filename_for_doi, pdf_is_valid
 from paperget.errors import PaperGetError
 
@@ -43,4 +45,21 @@ class DownloaderTests(unittest.TestCase):
             with self.assertRaises(PaperGetError) as raised:
                 Downloader(Http(b"<html>Not a PDF</html>")).download("https://example.org/a.pdf", path)
             self.assertEqual(raised.exception.code, "invalid_pdf")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_interrupted_download_leaves_no_partial_file(self):
+        class Interrupted(Response):
+            def iter_content(self, chunk_size):
+                yield b"%PDF-1.7\npartial"
+                raise requests.ConnectionError("connection lost")
+
+        class InterruptedHttp:
+            def get(self, *_args, **_kwargs):
+                return Interrupted(b"")
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            path = Path(directory) / "article.pdf"
+            with self.assertRaises(PaperGetError) as raised:
+                Downloader(InterruptedHttp()).download("https://example.org/a.pdf", path)
+            self.assertEqual(raised.exception.code, "connection_error")
             self.assertEqual(list(Path(directory).iterdir()), [])
