@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from paperget.cli import main
+from paperget.errors import PaperGetError
 
 
 DOI = "10.1371/journal.pone.0000001"
@@ -49,7 +50,71 @@ class Http:
         return Response(url, body=b"%PDF-1.7\nexample content")
 
 
+class SearchHttp:
+    def __init__(self, items):
+        self.items = items
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        if url != "https://api.crossref.org/works":
+            raise AssertionError(f"search tried a non-metadata URL: {url}")
+        return Response(url, data={"message": {"items": self.items}})
+
+
 class CliTests(unittest.TestCase):
+    def test_search_json_lists_candidates_without_downloading(self):
+        items = [
+            {"DOI": "10.1234/first", "title": ["Human preimplantation embryos"], "author": [{"family": "Yan"}]},
+            {"DOI": "10.1234/second", "title": ["Economics of cities"]},
+        ]
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            output = io.StringIO()
+            http = SearchHttp(items)
+            with patch("paperget.service.HttpClient", return_value=http), contextlib.redirect_stdout(output):
+                code = main(["search", "preimplantation human embryos", "--limit", "2", "--json", "--output", directory])
+            self.assertEqual(code, 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual((result["status"], result["count"]), ("found", 2))
+            self.assertEqual(result["candidates"][0]["doi"], "10.1234/first")
+            self.assertEqual(http.calls, ["https://api.crossref.org/works"])
+            self.assertFalse(list(Path(directory).glob("*.pdf")))
+
+    def test_search_empty_result_and_invalid_limit(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            output = io.StringIO()
+            with patch("paperget.service.HttpClient", return_value=SearchHttp([])), contextlib.redirect_stdout(output):
+                code = main(["search", "unfindable title", "--json", "--output", directory])
+            self.assertEqual(code, 3)
+            self.assertEqual(json.loads(output.getvalue())["status"], "not_found")
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            main(["search", "title", "--limit", "0"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_search_reports_metadata_failure(self):
+        class RateLimited:
+            def get(self, *_args, **_kwargs):
+                raise PaperGetError("rate_limited", "Crossref HTTP 429")
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            output = io.StringIO()
+            with patch("paperget.service.HttpClient", return_value=RateLimited()), contextlib.redirect_stdout(output):
+                code = main(["search", "human embryos", "--json", "--output", directory])
+            self.assertEqual(code, 3)
+            result = json.loads(output.getvalue())
+            self.assertEqual((result["status"], result["error_code"]), ("failed", "rate_limited"))
+
+    def test_search_handles_titles_outside_console_encoding(self):
+        items = [{"DOI": "10.1234/symbol", "title": ["Embryos 🙂 study"]}]
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            raw = io.BytesIO()
+            console = io.TextIOWrapper(raw, encoding="gbk", errors="strict")
+            with patch("paperget.service.HttpClient", return_value=SearchHttp(items)), contextlib.redirect_stdout(console):
+                code = main(["search", "embryos", "--output", directory])
+            console.flush()
+            self.assertEqual(code, 0)
+            self.assertIn("Embryos \\U0001f642 study", raw.getvalue().decode("gbk"))
+
     def test_scihub_url_requires_https(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             main(["get", DOI, "--scihub-url", "http://sci-hub.al/"])

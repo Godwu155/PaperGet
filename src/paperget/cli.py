@@ -17,8 +17,14 @@ from .store import Store
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="paperget", description="Find and download research papers by DOI or title")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("get", "batch", "inspect", "export"):
+    for command in ("get", "batch", "inspect", "search", "export"):
         entry = sub.add_parser(command)
+        if command == "search":
+            entry.add_argument("title", help="Title words to search for; does not download")
+            entry.add_argument("--limit", type=int, default=10, help="Maximum candidates (1-50)")
+            entry.add_argument("--output", type=Path, default=Path("downloads"), help="Directory for metadata cache")
+            entry.add_argument("--json", action="store_true", help="Print one JSON result object")
+            continue
         if command == "export":
             entry.add_argument("--output", type=Path, default=Path("downloads"))
             entry.add_argument("--format", choices=("json", "csv"), default="json")
@@ -76,7 +82,7 @@ def _queries(file: Path, column: str):
 
 def _print(result: Result, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(result.to_dict(), ensure_ascii=False))
+        print(json.dumps(result.to_dict(), ensure_ascii=True))
     else:
         label = f"{result.status}: {result.query}"
         if result.path:
@@ -86,6 +92,24 @@ def _print(result: Result, as_json: bool) -> None:
         print(label)
         for candidate in result.candidates:
             print(f"  {candidate.source} {candidate.version or 'unknown version'} {candidate.url}")
+
+
+def _print_search(result, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result.to_dict(), ensure_ascii=True))
+        return
+    if result.status != "found":
+        print(f"{result.status}: {result.query} ({result.message})")
+        return
+    print(f"{len(result.candidates)} title candidates for: {result.query}")
+    for number, candidate in enumerate(result.candidates, 1):
+        authors = ", ".join(candidate.authors[:3])
+        if len(candidate.authors) > 3:
+            authors += " et al."
+        print(f"{number}. [{candidate.match_score:.3f}] {candidate.title} ({candidate.year or '?'})")
+        if authors:
+            print(f"   {authors}")
+        print(f"   {candidate.to_dict()['doi_url']}")
 
 
 def _write_report(path: Path, rows: list[dict], format: str) -> None:
@@ -102,6 +126,10 @@ def _write_report(path: Path, rows: list[dict], format: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(errors="backslashreplace")
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "export":
@@ -116,6 +144,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         print(path)
         return 0
+    if args.command == "search":
+        if not args.title.strip():
+            parser.error("provide title words to search")
+        if not 1 <= args.limit <= 50:
+            parser.error("--limit must be between 1 and 50")
+        config = Config.from_env(output_dir=args.output, scihub_base_url=None)
+        with PaperGetService(config) as service:
+            result = service.search_title(args.title, limit=args.limit)
+        _print_search(result, args.json)
+        return 0 if result.status == "found" else 3
     source_order = tuple(s.strip() for s in args.source_order.split(",") if s.strip())
     if not source_order or len(set(source_order)) != len(source_order) or any(s not in {"openalex", "scihub"} for s in source_order):
         parser.error("--source-order must contain openalex and/or scihub")

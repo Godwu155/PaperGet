@@ -1,6 +1,6 @@
 # PaperGet
 
-输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。首版提供命令行和可供未来图形界面调用的 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
+输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。当前提供命令行和可供未来图形界面调用的 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
 
 ## 安装
 
@@ -12,7 +12,7 @@ python -m venv .venv
 .venv\Scripts\paperget --help
 ```
 
-若本机 Python 的 `venv`/`ensurepip` 不可用，也可用 `uv venv .venv`、`uv pip install --python .venv\Scripts\python.exe .` 安装。
+若本机 Python 的 `venv`/`ensurepip` 不可用，也可用 `uv venv .venv`、`uv pip install --python .venv\Scripts\python.exe .` 安装。若 `uv` 生成的 Windows 启动器无法运行，可用 `.venv\Scripts\python -m paperget.cli` 加相同子命令。
 
 OpenAlex 允许少量匿名查询；批量使用建议申请免费 API key。以下环境变量仅对当前 PowerShell 会话生效：
 
@@ -30,6 +30,18 @@ paperget inspect 10.1371/journal.pone.0000001 --json
 ```
 
 `inspect` 查询论文和候选位置，不下载 PDF。标题检索来自 Crossref；若多个结果接近，在交互终端提供前三项供选择。在非交互模式下返回 `ambiguous`，不会默默选一篇。`--prefer-published` 可优先尝试最终出版版。
+
+## 标题模糊搜索
+
+`search` 只检索候选元数据，不下载 PDF，也不会自动选定论文。输入可以是部分标题或词序不同的关键词：
+
+```powershell
+paperget search "single cell RNA seq profiling human preimplantation embryos" --limit 10
+paperget search "single cell RNA seq profiling human preimplantation embryos" --json
+paperget get 10.1038/nsmb.2660 --output downloads
+```
+
+默认列出最多 10 条；`--limit` 可设为 1–50。候选包括标题、作者、年份、DOI 链接和 `match_score`。分数范围 0–1，只用于排序，**不是论文正确匹配的概率**；下载前请核对 DOI。`--json` 输出一个对象，字段为 `query`、`status`、`count`、`candidates`、`error_code`、`message`，便于后续 GUI 显示候选列表。标题搜索结果也使用输出目录中的 SQLite 元数据缓存。
 
 PDF 使用安全化 DOI 命名，默认保存到 `downloads`。已存在且文件头有效的 PDF 会跳过；`--force` 才重新下载。下载写入临时文件，检查大小和 `%PDF-` 文件头后原子改名。若开放链接返回 403、HTML 或无效文件，会尝试其他候选；同一主机返回 403 或 429 后不再尝试该主机。
 
@@ -70,6 +82,8 @@ from paperget import Config, PaperGetService
 
 config = Config.from_env(output_dir=Path("downloads"), non_interactive=True)
 with PaperGetService(config) as service:
+    matches = service.search_title("single cell RNA seq profiling human preimplantation embryos", limit=10)
+    print(matches.to_dict())
     result = service.fetch("10.1371/journal.pone.0000001")
     print(result.to_dict())
 ```

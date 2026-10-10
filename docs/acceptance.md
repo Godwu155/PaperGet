@@ -1,4 +1,4 @@
-# PaperGet v0.1 验收样本
+# PaperGet v0.2 验收样本
 
 验收日期：2026-10-10。实站结果仅说明当时的网络与站点状态，重跑可能变化。测试文件保存在本地忽略目录 `.tmp/`，不提交论文 PDF。
 
@@ -13,5 +13,6 @@
 | 错误页面与中断 | 模拟 HTML 伪装 PDF、传输中断 | 不留下目标 PDF 或 `.part` 文件，可尝试下一候选。 |
 | 限流与禁止 | 模拟 429、403 | 429 按 `Retry-After` 重试；403 立即停止该主机的后续候选。 |
 | 批量继续与导出 | 三行 TXT：有效 DOI、Crossref 坏 JSON 的标题、重复 DOI | 依次得到 `downloaded`、`failed`、`existing`；报告和 SQLite 导出仍可读。 |
+| 标题模糊搜索 | `single cell RNA seq profiling human preimplantation embryos` | `search --limit 10` 实际返回 10 条 Crossref 候选；目标 DOI `10.1038/nsmb.2660` 排第一。只查询元数据，不下载；JSON 包含作者、年份、排序分数和 DOI 链接。 |
 
-本机系统 Python 的 `ensurepip` 无法建立虚拟环境，因此改用 `uv venv` 基于 Python 3.12.14 创建全新环境，并通过 `uv pip install .` 安装项目及 `requests` 依赖；该环境中的 `paperget.exe --help` 成功运行。另已构建 wheel 并从 wheel 执行 CLI。标准自动化测试 23 项通过。
+本机系统 Python 的 `ensurepip` 无法建立虚拟环境，因此改用 `uv venv --seed` 基于 Python 3.12.14 创建全新环境，再用该环境的 `pip` 安装 v0.2 wheel 及依赖；`paperget.exe search --help` 成功运行。单独用 `uv pip` 安装同一 wheel 时，模块入口可用，但其生成的 Windows `paperget.exe` 在本机报 `Failed to canonicalize script path`；已确认不是项目的 `pip` 安装入口故障。标准自动化测试 29 项通过。

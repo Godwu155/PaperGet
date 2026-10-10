@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from .errors import PaperGetError
 from .http import HttpClient
-from .models import Paper
+from .models import Paper, TitleMatch
 from .store import Store
 
 
@@ -36,17 +36,37 @@ def title_score(query: str, candidate: str) -> float:
     return 0.7 * sequence + 0.3 * jaccard
 
 
+def search_score(query: str, candidate: str) -> float:
+    """Rank partial and reordered titles; this is not a probability."""
+    query_words = set(_plain(query).split())
+    title_words = set(_plain(candidate).split())
+    if not query_words or not title_words:
+        return 0.0
+    overlap = len(query_words & title_words)
+    coverage = overlap / len(query_words)
+    jaccard = overlap / len(query_words | title_words)
+    return round(max(title_score(query, candidate), 0.75 * coverage + 0.25 * jaccard), 4)
+
+
+def _candidate_title(item: dict) -> str:
+    titles = item.get("title")
+    return titles[0] if isinstance(titles, list) and titles and isinstance(titles[0], str) else ""
+
+
 def _paper(item: dict) -> Paper:
-    date = (item.get("published") or {}).get("date-parts", [[]])
-    year = date[0][0] if date and date[0] else None
+    published = item.get("published")
+    date = published.get("date-parts", [[]]) if isinstance(published, dict) else [[]]
+    year = date[0][0] if isinstance(date, list) and date and isinstance(date[0], list) and date[0] else None
+    authors = item.get("author")
+    names = [
+        " ".join(part for part in (author.get("given"), author.get("family")) if isinstance(part, str) and part)
+        for author in (authors if isinstance(authors, list) else []) if isinstance(author, dict)
+    ]
     return Paper(
         doi=item["DOI"].lower(),
-        title=(item.get("title") or [""])[0],
-        year=year,
-        authors=tuple(
-            " ".join(filter(None, [a.get("given"), a.get("family")]))
-            for a in item.get("author", [])
-        ),
+        title=_candidate_title(item),
+        year=year if isinstance(year, int) else None,
+        authors=tuple(name for name in names if name),
     )
 
 
@@ -55,6 +75,50 @@ class Resolver:
         self.http = http
         self.mailto = mailto
         self.cache = cache
+
+    def _title_items(self, query: str, rows: int) -> list[dict]:
+        cache_source = "crossref-title" if rows == 5 else f"crossref-title-{rows}"
+        cache_key = _plain(query)
+        cached = self.cache.cached(cache_source, cache_key) if self.cache else None
+        if cached is not None:
+            items = cached.get("items")
+            if isinstance(items, list):
+                return items
+        params = {"query.title": query, "rows": rows, "select": "DOI,title,published,author"}
+        if self.mailto:
+            params["mailto"] = self.mailto
+        response = self.http.get("https://api.crossref.org/works", params=params)
+        try:
+            if response.status_code == 404:
+                return []
+            try:
+                items = response.json().get("message", {}).get("items", [])
+                if not isinstance(items, list):
+                    raise ValueError("items must be a list")
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise PaperGetError("invalid_response", "Crossref returned invalid title results") from exc
+        finally:
+            response.close()
+        if self.cache:
+            self.cache.cache(cache_source, cache_key, {"items": items})
+        return items
+
+    def search_title(self, query: str, *, limit: int = 10) -> list[TitleMatch]:
+        query = query.strip()
+        if not query or not 1 <= limit <= 50:
+            raise PaperGetError("invalid_input", "Provide a title and a limit from 1 to 50")
+        unique: dict[str, dict] = {}
+        for item in self._title_items(query, limit):
+            if isinstance(item, dict) and isinstance(item.get("DOI"), str) and item["DOI"].strip() and _candidate_title(item):
+                unique.setdefault(item["DOI"].lower(), item)
+        matches = []
+        for item in unique.values():
+            paper = _paper(item)
+            matches.append(TitleMatch(
+                doi=paper.doi, title=paper.title, year=paper.year,
+                authors=paper.authors, match_score=search_score(query, paper.title),
+            ))
+        return sorted(matches, key=lambda match: (-match.match_score, match.doi))[:limit]
 
     def resolve(self, query: str, *, choose=None) -> Paper:
         doi = normalize_doi(query)
@@ -86,38 +150,13 @@ class Resolver:
             finally:
                 response.close()
 
-        cache_key = _plain(query)
-        cached = self.cache.cached("crossref-title", cache_key) if self.cache else None
-        if cached is None:
-            params = {"query.title": query, "rows": 5, "select": "DOI,title,published,author"}
-            if self.mailto:
-                params["mailto"] = self.mailto
-            response = self.http.get("https://api.crossref.org/works", params=params)
-            try:
-                if response.status_code == 404:
-                    raise PaperGetError("not_found", f"Title not found: {query}")
-                try:
-                    items = response.json().get("message", {}).get("items", [])
-                    if not isinstance(items, list):
-                        raise ValueError("items must be a list")
-                except (ValueError, TypeError, AttributeError) as exc:
-                    raise PaperGetError("invalid_response", "Crossref returned invalid title results") from exc
-            finally:
-                response.close()
-            if self.cache:
-                self.cache.cache("crossref-title", cache_key, {"items": items})
-        else:
-            items = cached.get("items", [])
+        items = self._title_items(query, 5)
         unique: dict[str, dict] = {}
         for item in items:
-            if isinstance(item, dict) and isinstance(item.get("DOI"), str):
+            if isinstance(item, dict) and isinstance(item.get("DOI"), str) and item["DOI"].strip():
                 unique.setdefault(item["DOI"].lower(), item)
-        def candidate_title(item: dict) -> str:
-            titles = item.get("title")
-            return titles[0] if isinstance(titles, list) and titles and isinstance(titles[0], str) else ""
-
         ranked = sorted(
-            ((title_score(query, candidate_title(i)), i) for i in unique.values()),
+            ((title_score(query, _candidate_title(i)), i) for i in unique.values()),
             key=lambda pair: pair[0],
             reverse=True,
         )

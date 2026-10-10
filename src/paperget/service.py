@@ -7,7 +7,7 @@ from .config import Config
 from .downloader import Downloader, filename_for_doi, pdf_is_valid
 from .errors import PaperGetError
 from .http import HttpClient
-from .models import Candidate, Result
+from .models import Candidate, Result, SearchResult
 from .providers.openalex import OpenAlexProvider
 from .providers.scihub import SciHubProvider
 from .resolver import Resolver
@@ -24,6 +24,16 @@ class PaperGetService:
         self.providers = {"openalex": OpenAlexProvider(self.http, config.openalex_api_key, self.store)}
         if config.scihub_base_url:
             self.providers["scihub"] = SciHubProvider(self.http, config.scihub_base_url)
+
+    def search_title(self, query: str, *, limit: int = 10) -> SearchResult:
+        try:
+            matches = self.resolver.search_title(query, limit=limit)
+        except PaperGetError as exc:
+            return SearchResult(query=query, status="failed", error_code=exc.code, message=str(exc))
+        return SearchResult(
+            query=query, status="found" if matches else "not_found", candidates=matches,
+            message=None if matches else "No title candidates found",
+        )
 
     def fetch(self, query: str, *, inspect: bool = False, choose=None) -> Result:
         query = query.strip()
