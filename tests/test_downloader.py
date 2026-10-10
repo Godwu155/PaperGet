@@ -4,7 +4,7 @@ from pathlib import Path
 
 import requests
 
-from paperget.downloader import Downloader, filename_for_doi, pdf_is_valid
+from paperget.downloader import Downloader, filename_for_doi, filename_for_paper, pdf_is_valid
 from paperget.errors import PaperGetError
 
 
@@ -31,6 +31,15 @@ class Http:
 
 
 class DownloaderTests(unittest.TestCase):
+    def test_title_filename_is_safe_and_unique(self):
+        first = filename_for_paper('A: Study / of <Cells>?', '10.1234/one')
+        second = filename_for_paper('A: Study / of <Cells>?', '10.1234/two')
+        self.assertTrue(first.startswith('A Study of Cells ['))
+        self.assertTrue(first.endswith('.pdf'))
+        self.assertNotEqual(first, second)
+        self.assertEqual(filename_for_paper('', '10.1234/one'), filename_for_doi('10.1234/one'))
+        self.assertLessEqual(len(filename_for_paper('😀' * 200, '10.1234/one').encode('utf-16-le')) // 2, 255)
+
     def test_valid_pdf_and_duplicate(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             path = Path(directory) / filename_for_doi("10.1234/a/b")

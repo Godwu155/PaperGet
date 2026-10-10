@@ -4,7 +4,9 @@ import sqlite3
 from pathlib import Path
 
 from paperget.config import Config
+from paperget.downloader import filename_for_doi, filename_for_paper
 from paperget.errors import PaperGetError
+from paperget.models import Paper
 from paperget.service import PaperGetService
 
 
@@ -71,6 +73,7 @@ class ServiceTests(unittest.TestCase):
                 result = service.fetch(DOI)
                 self.assertEqual((result.status, result.source), ("downloaded", "openalex"))
                 self.assertTrue(result.path.is_file())
+                self.assertEqual(result.path.name, filename_for_paper("Example paper", DOI))
                 self.assertEqual(result.path.read_bytes()[:5], b"%PDF-")
                 before = len(http.calls)
                 again = service.fetch(DOI)
@@ -79,6 +82,46 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(len(http.calls), before)
                 attempts = service.store.connection.execute("SELECT status FROM attempts ORDER BY id").fetchall()
                 self.assertEqual([row[0] for row in attempts], ["failed", "downloaded"])
+
+    def test_legacy_doi_filename_is_reused(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            old_path = Path(directory) / filename_for_doi(DOI)
+            old_path.write_bytes(b"%PDF-1.7\nlegacy")
+            http = Http()
+            with PaperGetService(Config(output_dir=Path(directory)), http=http) as service:
+                result = service.fetch(DOI)
+                self.assertEqual(result.status, "existing")
+                self.assertEqual(result.path, old_path)
+                self.assertFalse(any(url.endswith(".pdf") for url in http.calls))
+
+    def test_recorded_file_is_reused_if_metadata_title_changes(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            http = Http()
+            with PaperGetService(Config(output_dir=Path(directory)), http=http) as service:
+                first = service.fetch(DOI)
+                before = len(http.calls)
+                service.resolver.resolve = lambda *_args, **_kwargs: Paper(doi=DOI, title="Revised title")
+                again = service.fetch(DOI)
+                self.assertEqual(again.status, "existing")
+                self.assertEqual(again.path, first.path)
+                self.assertEqual(len(http.calls), before)
+
+    def test_openalex_title_fills_missing_crossref_title(self):
+        class MetadataHttp(Http):
+            def get(self, url, **kwargs):
+                response = super().get(url, **kwargs)
+                if "api.crossref.org" in url:
+                    response.data["message"]["title"] = []
+                if "api.openalex.org" in url:
+                    response.data["title"] = "OpenAlex: Paper / Title"
+                return response
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with PaperGetService(Config(output_dir=Path(directory)), http=MetadataHttp()) as service:
+                result = service.fetch(DOI)
+                self.assertEqual(result.status, "downloaded")
+                self.assertEqual(result.title, "OpenAlex: Paper / Title")
+                self.assertEqual(result.path.name, filename_for_paper(result.title, DOI))
 
     def test_inspect_uses_metadata_cache_and_does_not_download(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:

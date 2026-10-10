@@ -1,6 +1,6 @@
 # PaperGet
 
-输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。当前提供命令行和可供未来图形界面调用的 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
+输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。提供命令行、Windows 图形界面开发版和 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
 
 ## 安装
 
@@ -14,14 +14,14 @@ python -m venv .venv
 
 ## Windows 图形界面（开发版）
 
-GUI 使用 PySide6，作为可选依赖安装；只使用命令行时无需安装它。
+GUI 使用 PySide6 和系统凭据管理器，作为可选依赖安装；只使用命令行时无需安装它们。
 
 ```powershell
 .venv\Scripts\python -m pip install -e '.[gui]'
 .venv\Scripts\paperget-gui
 ```
 
-在主窗口输入 DOI 可直接检查来源；输入部分标题则列出候选论文，选中并核对 DOI 后点击“获取 PDF”。下方可导入 TXT/CSV 批量任务，查看历史并导出 JSON/CSV。设置中可调整下载目录、来源顺序、出版版偏好与大小上限。Sci-Hub 默认关闭，只有在设置中主动启用并填写 HTTPS 入口后才作为后备来源。`OPENALEX_API_KEY` 和 `CROSSREF_MAILTO` 仍从环境变量读取，不保存到 GUI 设置。
+在主窗口输入 DOI 可直接检查来源；输入部分标题则列出候选论文，选中并核对 DOI 后点击“获取 PDF”。下方可导入 TXT/CSV 批量任务，查看历史并导出 JSON/CSV。设置中可调整下载目录、来源顺序、出版版偏好与大小上限，也可填写 OpenAlex API Key 和 Crossref 联系邮箱。Windows 上的 Key 保存在凭据管理器，不写入普通设置文件；若凭据管理器不可用，输入的 Key 仅在本次运行中有效。环境变量 `OPENALEX_API_KEY` 和 `CROSSREF_MAILTO` 仍可使用。Sci-Hub 默认关闭，只有在设置中主动启用并填写 HTTPS 入口后才作为后备来源。
 
 下载与网络操作在后台运行；当前显示阶段状态，不显示无法核实的下载百分比。等待中的批量任务可移除；正在进行的网络任务需等其结束后关闭窗口。界面实施与验收细节见 [GUI 开发说明](docs/gui.md)。
 
@@ -56,7 +56,7 @@ paperget get 10.1038/nsmb.2660 --output downloads
 
 默认列出最多 10 条；`--limit` 可设为 1–50。候选包括标题、作者、年份、DOI 链接和 `match_score`。分数范围 0–1，只用于排序，**不是论文正确匹配的概率**；下载前请核对 DOI。`--json` 输出一个对象，字段为 `query`、`status`、`count`、`candidates`、`error_code`、`message`，便于后续 GUI 显示候选列表。标题搜索结果也使用输出目录中的 SQLite 元数据缓存。
 
-PDF 使用安全化 DOI 命名，默认保存到 `downloads`。已存在且文件头有效的 PDF 会跳过；`--force` 才重新下载。下载写入临时文件，检查大小和 `%PDF-` 文件头后原子改名。若开放链接返回 403、HTML 或无效文件，会尝试其他候选；同一主机返回 403 或 429 后不再尝试该主机。
+PDF 使用论文标题命名，并附加由 DOI 生成的简短标识，默认保存到 `downloads`。例如 `Example paper [a1b2c3d4e5].pdf`；Crossref 没有标题时会尝试使用 OpenAlex 标题，两者都没有时退回 DOI 命名。文件名会清理 Windows 禁用字符并限制长度。同一输出目录里已存在的旧版 DOI 文件名仍被识别和复用，不会自动改名。已存在且文件头有效的 PDF 会跳过；`--force` 才重新下载。下载写入临时文件，检查大小和 `%PDF-` 文件头后原子改名。若开放链接返回 403、HTML 或无效文件，会尝试其他候选；同一主机返回 403 或 429 后不再尝试该主机。
 
 ## 批量、报告与恢复
 

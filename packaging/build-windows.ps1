@@ -15,6 +15,7 @@ $arguments = @(
     '--standalone',
     '--enable-plugin=pyside6',
     '--include-package=paperget',
+    '--include-module=keyring.backends.Windows',
     '--noinclude-qt-translations',
     '--include-qt-plugins=platforminputcontexts',
     '--windows-console-mode=disable',

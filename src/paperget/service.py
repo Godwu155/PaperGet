@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from urllib.parse import urlparse
 
 from .config import Config
-from .downloader import Downloader, filename_for_doi, pdf_is_valid
+from .downloader import Downloader, filename_for_doi, filename_for_paper, pdf_is_valid
 from .errors import PaperGetError
 from .http import HttpClient
 from .models import Candidate, Result, SearchResult
@@ -45,15 +46,29 @@ class PaperGetService:
             status = "ambiguous" if exc.code == "ambiguous_title" else "not_found" if exc.code == "not_found" else "failed"
             return self._save(Result(query=query, status=status, error_code=exc.code, message=str(exc)), inspect)
 
-        destination = self.config.output_dir / filename_for_doi(paper.doi)
-        if not inspect and not self.config.force and pdf_is_valid(destination):
-            file_info = self.store.file_info(paper.doi)
-            return self._save(Result(
-                query=query, status="existing", doi=paper.doi, title=paper.title,
-                path=destination, sha256=self.downloader._hash(destination),
-                source=file_info[0] if file_info else None,
-                version=file_info[1] if file_info else None,
-            ), inspect)
+        def existing_file():
+            if inspect or self.config.force:
+                return None
+            file_record = self.store.file_record(paper.doi)
+            old_destination = self.config.output_dir / filename_for_doi(paper.doi)
+            paths = [self.config.output_dir / filename_for_paper(paper.title, paper.doi), old_destination]
+            if file_record and file_record[0].resolve().parent == self.config.output_dir.resolve():
+                paths.insert(0, file_record[0])
+            for existing_path in dict.fromkeys(paths):
+                if pdf_is_valid(existing_path):
+                    file_info = self.store.file_info(paper.doi)
+                    return Result(
+                        query=query, status="existing", doi=paper.doi, title=paper.title,
+                        path=existing_path, sha256=self.downloader._hash(existing_path),
+                        source=file_info[0] if file_info else None,
+                        version=file_info[1] if file_info else None,
+                    )
+            return None
+
+        existing = existing_file()
+        if existing:
+            return self._save(existing, inspect)
+        destination = self.config.output_dir / filename_for_paper(paper.title, paper.doi)
 
         candidates: list[Candidate] = []
         errors: list[str] = []
@@ -72,6 +87,15 @@ class PaperGetService:
             except (ValueError, KeyError, TypeError) as exc:
                 errors.append(f"{name}: invalid_response: {exc}")
                 continue
+            if name == "openalex" and not paper.title:
+                metadata = self.store.cached("openalex", paper.doi)
+                title = metadata.get("title") if isinstance(metadata, dict) else None
+                if isinstance(title, str) and title.strip():
+                    paper = replace(paper, title=title.strip())
+                    destination = self.config.output_dir / filename_for_paper(paper.title, paper.doi)
+                    existing = existing_file()
+                    if existing:
+                        return self._save(existing, inspect)
             if self.config.prefer_published:
                 found.sort(key=lambda c: c.version != "publishedVersion")
             candidates.extend(found)

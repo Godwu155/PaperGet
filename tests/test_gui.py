@@ -75,6 +75,29 @@ class GuiSmokeTests(unittest.TestCase):
             settings.sync()
             del dialog, settings
 
+    def test_gui_key_and_crossref_email_settings(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            settings = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+            with patch("paperget.gui_window.get_openalex_key", return_value=None), \
+                 patch("paperget.gui_window.save_openalex_key", return_value=True) as save:
+                dialog = SettingsDialog(settings, None)
+                dialog.output.setText(str(root / "papers"))
+                dialog.openalex_key.setText("secret-key")
+                dialog.crossref_mailto.setText("reader@example.org")
+                dialog._save()
+                self.assertEqual(dialog.result(), SettingsDialog.Accepted)
+                save.assert_called_once_with("secret-key")
+                dialog.deleteLater()
+                self.app.processEvents()
+            with patch("paperget.gui_window.get_openalex_key", return_value="secret-key"):
+                config = _config(settings)
+            self.assertEqual(config.openalex_api_key, "secret-key")
+            self.assertEqual(config.crossref_mailto, "reader@example.org")
+            settings.sync()
+            self.assertNotIn("secret-key", (root / "settings.ini").read_text(encoding="utf-8"))
+            del settings
+
     def test_search_candidate_inspect_and_download_queue(self):
         calls = []
 

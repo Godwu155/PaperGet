@@ -77,6 +77,15 @@ class Store:
         except sqlite3.Error:
             return None
 
+    def file_record(self, doi: str) -> tuple[Path, str | None, str | None] | None:
+        try:
+            row = self.connection.execute(
+                "SELECT path, source, version FROM files WHERE doi=?", (doi,)
+            ).fetchone()
+            return (Path(row[0]), row[1], row[2]) if row else None
+        except (sqlite3.Error, TypeError):
+            return None
+
     def attempt(self, query: str, candidate: Candidate, status: str, error=None) -> None:
         self.connection.execute(
             "INSERT INTO attempts (query, source, url, status, error_code, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

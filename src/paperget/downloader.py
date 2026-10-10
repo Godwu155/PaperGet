@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import tempfile
+import unicodedata
 from pathlib import Path
 
 import requests
@@ -27,6 +28,30 @@ def filename_for_doi(doi: str) -> str:
     if len(safe) > 120:
         safe = safe[:100] + "_" + hashlib.sha256(doi.encode()).hexdigest()[:12]
     return safe + ".pdf"
+
+
+def filename_for_paper(title: str, doi: str) -> str:
+    """Use a readable, Windows-safe title with a stable DOI collision suffix."""
+    clean = "".join(
+        " " if char in '<>:"/\\|?*' or unicodedata.category(char).startswith("C") else char
+        for char in unicodedata.normalize("NFC", title)
+    )
+    clean = re.sub(r"\s+", " ", clean).strip(" .")
+    if not clean:
+        return filename_for_doi(doi)
+    suffix = hashlib.sha256(doi.casefold().encode("utf-8")).hexdigest()[:12]
+    # Leave space for the suffix and extension in a Windows path component.
+    units = 0
+    end = 0
+    for char in clean:
+        units += len(char.encode("utf-16-le")) // 2
+        if units > 120:
+            break
+        end += 1
+    clean = clean[:end].rstrip(" .")
+    if not clean:
+        return filename_for_doi(doi)
+    return f"{clean} [{suffix}].pdf"
 
 
 class Downloader:

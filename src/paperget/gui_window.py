@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import os
 from pathlib import Path
 from tempfile import TemporaryFile
 from urllib.parse import urlparse
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .config import Config
+from .credentials import clear_openalex_key, get_openalex_key, save_openalex_key
 from .gui_backend import Task, perform
 from .models import Result, SearchResult, TitleMatch
 from .resolver import normalize_doi
@@ -68,6 +70,8 @@ def _config(settings: QSettings) -> Config:
         order = ("openalex", "scihub")
     return Config.from_env(
         output_dir=output,
+        openalex_api_key=get_openalex_key() or os.getenv("OPENALEX_API_KEY") or None,
+        crossref_mailto=str(settings.value("crossref_mailto", "")).strip() or os.getenv("CROSSREF_MAILTO") or None,
         scihub_base_url=scihub_url or None,
         source_order=order if scihub_url else ("openalex",),
         prefer_published=settings.value("prefer_published", False, type=bool),
@@ -81,7 +85,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("设置")
-        self.resize(560, 280)
+        self.resize(600, 360)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         output_row = QHBoxLayout()
@@ -99,6 +103,22 @@ class SettingsDialog(QDialog):
         self.maximum.setValue(settings.value("max_pdf_mb", 100, type=int))
         self.maximum.setSuffix(" MB")
         form.addRow("PDF 大小上限", self.maximum)
+        self.openalex_key = QLineEdit()
+        self.openalex_key.setEchoMode(QLineEdit.Password)
+        self.openalex_key.setPlaceholderText("已有 Key；留空保持不变" if get_openalex_key() else "粘贴 OpenAlex API Key（可选）")
+        self.clear_key = QPushButton("清除")
+        self.clear_key.clicked.connect(self._mark_key_for_clear)
+        self._clear_key = False
+        key_row = QHBoxLayout()
+        key_row.addWidget(self.openalex_key)
+        key_row.addWidget(self.clear_key)
+        form.addRow("OpenAlex API Key", key_row)
+        self.key_status = QLabel("已配置 Key" if get_openalex_key() else
+                                 "当前使用环境变量" if os.getenv("OPENALEX_API_KEY") else "尚未配置")
+        form.addRow("Key 状态", self.key_status)
+        self.crossref_mailto = QLineEdit(str(settings.value("crossref_mailto", "")))
+        self.crossref_mailto.setPlaceholderText("you@example.com（可选）")
+        form.addRow("Crossref 联系邮箱", self.crossref_mailto)
         self.source_order = QComboBox()
         self.source_order.addItem("开放来源优先", "openalex,scihub")
         self.source_order.addItem("Sci-Hub 优先", "scihub,openalex")
@@ -114,7 +134,7 @@ class SettingsDialog(QDialog):
         self.scihub.toggled.connect(self.scihub_url.setEnabled)
         form.addRow("Sci-Hub 入口", self.scihub_url)
         layout.addLayout(form)
-        layout.addWidget(QLabel("开放来源优先。API key 与 Crossref 邮箱从环境变量读取，不保存在设置中。"))
+        layout.addWidget(QLabel("Key 保存在 Windows 凭据管理器；不可用时仅在本次运行中使用。"))
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Save).setText("保存")
         buttons.button(QDialogButtonBox.Cancel).setText("取消")
@@ -126,6 +146,11 @@ class SettingsDialog(QDialog):
         path = QFileDialog.getExistingDirectory(self, "选择下载目录", self.output.text())
         if path:
             self.output.setText(path)
+
+    def _mark_key_for_clear(self) -> None:
+        self.openalex_key.clear()
+        self._clear_key = True
+        self.key_status.setText("保存设置后清除系统凭据；环境变量仍可生效")
 
     def _save(self) -> None:
         raw = self.output.text().strip()
@@ -149,7 +174,20 @@ class SettingsDialog(QDialog):
             if parsed.scheme != "https" or not parsed.hostname:
                 QMessageBox.warning(self, "设置无效", "Sci-Hub 入口必须是有效的 HTTPS 地址。")
                 return
+        mailto = self.crossref_mailto.text().strip()
+        if mailto and ("@" not in mailto or any(char.isspace() for char in mailto)):
+            QMessageBox.warning(self, "设置无效", "请输入有效的 Crossref 联系邮箱。")
+            return
+        key = self.openalex_key.text().strip()
+        if key:
+            persisted = save_openalex_key(key)
+            if not persisted:
+                QMessageBox.information(self, "Key 仅本次有效", "无法访问 Windows 凭据管理器；Key 仅在本次运行中使用。")
+        elif self._clear_key and not clear_openalex_key():
+            QMessageBox.warning(self, "清除未完成", "无法访问系统凭据管理器，已保存的 Key 可能仍存在。")
+            return
         self.settings.setValue("output_dir", str(path))
+        self.settings.setValue("crossref_mailto", mailto)
         self.settings.setValue("prefer_published", self.prefer.isChecked())
         self.settings.setValue("max_pdf_mb", self.maximum.value())
         self.settings.setValue("source_order", self.source_order.currentData())
