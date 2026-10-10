@@ -12,6 +12,19 @@ python -m venv .venv
 .venv\Scripts\paperget --help
 ```
 
+## Windows 图形界面（开发版）
+
+GUI 使用 PySide6，作为可选依赖安装；只使用命令行时无需安装它。
+
+```powershell
+.venv\Scripts\python -m pip install -e '.[gui]'
+.venv\Scripts\paperget-gui
+```
+
+在主窗口输入 DOI 可直接检查来源；输入部分标题则列出候选论文，选中并核对 DOI 后点击“获取 PDF”。下方可导入 TXT/CSV 批量任务，查看历史并导出 JSON/CSV。设置中可调整下载目录、来源顺序、出版版偏好与大小上限。Sci-Hub 默认关闭，只有在设置中主动启用并填写 HTTPS 入口后才作为后备来源。`OPENALEX_API_KEY` 和 `CROSSREF_MAILTO` 仍从环境变量读取，不保存到 GUI 设置。
+
+下载与网络操作在后台运行；当前显示阶段状态，不显示无法核实的下载百分比。等待中的批量任务可移除；正在进行的网络任务需等其结束后关闭窗口。界面实施与验收细节见 [GUI 开发说明](docs/gui.md)。
+
 若本机 Python 的 `venv`/`ensurepip` 不可用，也可用 `uv venv .venv`、`uv pip install --python .venv\Scripts\python.exe .` 安装。若 `uv` 生成的 Windows 启动器无法运行，可用 `.venv\Scripts\python -m paperget.cli` 加相同子命令。
 
 OpenAlex 允许少量匿名查询；批量使用建议申请免费 API key。以下环境变量仅对当前 PowerShell 会话生效：

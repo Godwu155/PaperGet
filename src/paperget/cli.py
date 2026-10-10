@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sqlite3
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .batch_io import read_queries, write_report
 from .config import Config
 from .models import Paper, Result
 from .service import PaperGetService
@@ -60,26 +60,6 @@ def _choose(papers: list[Paper]) -> int | None:
         return None
 
 
-def _queries(file: Path, column: str):
-    if file.suffix.lower() not in {".txt", ".csv"}:
-        raise ValueError("input file must be .txt or .csv")
-    if file.suffix.lower() == ".csv":
-        with file.open("r", encoding="utf-8-sig", newline="") as stream:
-            reader = csv.DictReader(stream)
-            if not reader.fieldnames or column not in reader.fieldnames:
-                raise ValueError(f"CSV column not found: {column}")
-            for row in reader:
-                value = (row.get(column) or "").strip()
-                if value:
-                    yield value
-    else:
-        with file.open("r", encoding="utf-8-sig") as stream:
-            for line in stream:
-                value = line.strip()
-                if value and not value.startswith("#"):
-                    yield value
-
-
 def _print(result: Result, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result.to_dict(), ensure_ascii=True))
@@ -112,19 +92,6 @@ def _print_search(result, as_json: bool) -> None:
         print(f"   {candidate.to_dict()['doi_url']}")
 
 
-def _write_report(path: Path, rows: list[dict], format: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if format == "json":
-        path.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    else:
-        fields = ["query", "doi", "title", "status", "path", "source", "version", "sha256", "error_code", "message"]
-        with path.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
-            writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-
-
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -139,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"result database not found: {database}")
         try:
             with Store(database) as store:
-                _write_report(path, store.export_json(), args.format)
+                write_report(path, store.export_json(), args.format)
         except (OSError, sqlite3.Error) as exc:
             parser.error(str(exc))
         print(path)
@@ -163,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         queries = [args.title or args.query]
     else:
         try:
-            queries = list(_queries(args.file, args.column))
+            queries = read_queries(args.file, args.column)
         except (OSError, UnicodeError, ValueError) as exc:
             parser.error(str(exc))
         if not queries:
@@ -196,10 +163,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "batch":
         try:
             if args.report:
-                _write_report(args.report, [result.to_dict() for result in results], args.report.suffix.lower()[1:])
+                write_report(args.report, [result.to_dict() for result in results], args.report.suffix.lower()[1:])
             ambiguous = [result.to_dict() for result in results if result.status == "ambiguous"]
             if ambiguous:
-                _write_report(args.output / "needs-review.json", ambiguous, "json")
+                write_report(args.output / "needs-review.json", ambiguous, "json")
         except OSError as exc:
             print(f"Failed to write report: {exc}", file=sys.stderr)
             return 1
