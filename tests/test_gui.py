@@ -10,7 +10,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
-    from paperget.gui_window import MainWindow, _config
+    from paperget.gui_window import MainWindow, SettingsDialog, _config
+    from paperget.gui_backend import Task
 except ImportError:
     QApplication = None
 
@@ -53,6 +54,27 @@ class GuiSmokeTests(unittest.TestCase):
             settings.sync()
             del settings
 
+    def test_settings_dialog_saves_preferences_without_keys(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            settings = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+            dialog = SettingsDialog(settings, None)
+            dialog.output.setText(str(root / "papers"))
+            dialog.maximum.setValue(75)
+            dialog.source_order.setCurrentIndex(1)
+            dialog.scihub.setChecked(True)
+            dialog.scihub_url.setText("https://example.org/")
+            dialog._save()
+            self.assertEqual(dialog.result(), SettingsDialog.Accepted)
+            self.assertTrue((root / "papers").is_dir())
+            self.assertEqual(settings.value("max_pdf_mb", type=int), 75)
+            self.assertEqual(settings.value("source_order"), "scihub,openalex")
+            self.assertNotIn("API_KEY", (root / "settings.ini").read_text(encoding="utf-8"))
+            dialog.deleteLater()
+            self.app.processEvents()
+            settings.sync()
+            del dialog, settings
+
     def test_search_candidate_inspect_and_download_queue(self):
         calls = []
 
@@ -92,6 +114,12 @@ class GuiSmokeTests(unittest.TestCase):
             self.wait_idle(window)
             self.assertEqual(window.queue_table.item(0, 1).text(), "已下载")
             self.assertEqual([kind for kind, _ in calls[:4]], ["history", "search", "inspect", "download"])
+            window._show_history([{"query": "10.1234/example", "doi": "10.1234/example",
+                                   "title": "Example Paper", "status": "downloaded",
+                                   "source": "openalex", "updated_at": "2026-10-10", "path": "missing.pdf"}])
+            window.history_filter.setText("10.1234/example")
+            self.assertFalse(window.history_table.isRowHidden(0))
+            self.assertFalse(window.history_open_button.isEnabled())
             window.close()
             window.deleteLater()
             self.app.processEvents()
@@ -100,6 +128,8 @@ class GuiSmokeTests(unittest.TestCase):
         def fake_perform(task, _config):
             if task.kind == "history":
                 return []
+            if task.kind == "import":
+                return ["10.1234/bad", "10.1234/good"]
             if task.kind == "download":
                 time.sleep(0.03)
                 if task.query.endswith("bad"):
@@ -110,8 +140,7 @@ class GuiSmokeTests(unittest.TestCase):
         with patch("paperget.gui_window.perform", side_effect=fake_perform):
             window = MainWindow()
             self.wait_idle(window)
-            window._enqueue("10.1234/bad")
-            window._enqueue("10.1234/good")
+            window._run_task(Task("import", path=Path("fake.txt")))
             window.query.setText("Window remains responsive")
             for _ in range(300):
                 self.app.processEvents()

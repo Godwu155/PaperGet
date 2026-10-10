@@ -44,3 +44,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 ```
 
 构建结果位于 `dist/windows_main.dist/PaperGet.exe`，需连同整个 `.dist` 目录分发。Nuitka 首次构建可能下载 Windows 依赖分析工具或编译器；再次构建使用缓存。构建后的程序应在干净 Windows 环境验收启动、中文显示、设置读写和开放 DOI 下载。
+
+## 2026-10-10 开发预览验证
+
+- 35 项自动化测试通过，涵盖 CLI 回归、批量 I/O、GUI 候选/来源/下载流程、失败后队列继续及设置读写。
+- 真实开放 DOI `10.1371/journal.pone.0000001` 通过 GUI 后端检查到 1 个 OpenAlex PDF 来源，并成功下载有效 PDF。
+- Windows 原生 Qt 平台检查了 1100×720、850×560 的中文布局和模拟深色调色板；主要控件可见。
+- 全新 CLI-only 虚拟环境安装后可运行 `paperget --help`，其中没有 PySide6。
+- Windows 独立程序已启动验证，运行时工作目录不同于仓库且未设置 `PYTHONPATH`。ZIP 分发包 SHA-256：`EE8EEC0DA004C508D7AE216126E0F366E522C8B3DCB57D02866F87E19C8C9734`。
+
+此版仍需在另一台干净 Windows 机器上验收打包程序的完整下载、系统缩放和不同网络错误场景，作为 v0.3 正式发布门槛。
