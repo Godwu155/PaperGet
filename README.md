@@ -86,6 +86,6 @@ $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
 
-开发任务见 [Linear 计划](https://linear.app/godwu155/document/paperget-v01-开发计划讨论稿-5bf2cb120eba)。
+开发任务与决策见 [Linear 计划与验收](https://linear.app/godwu155/document/paperget-v01-开发计划与验收-5bf2cb120eba)。
 
 已验证的样本和环境限制见 [验收记录](docs/acceptance.md)。
