@@ -99,16 +99,22 @@ class PaperGetService:
                 query=query, status="found" if candidates else "failed" if errors else "not_found",
                 doi=paper.doi, title=paper.title, candidates=candidates,
                 error_code=error_codes[0] if not candidates and error_codes else None,
-                message="; ".join(errors) or None,
+                message="; ".join(errors) or (self._no_pdf_message() if not candidates else None),
             )
         status = "failed" if errors else "not_found"
         error_code = next((code for code in error_codes if code in {"forbidden", "rate_limited", "timeout", "connection_error", "invalid_pdf", "disk_error"}), None)
         result = Result(
             query=query, status=status, doi=paper.doi, title=paper.title,
             error_code=error_code or ("no_pdf" if not candidates else "download_failed"),
-            message="; ".join(errors) or "No PDF candidate found",
+            message="; ".join(errors) or self._no_pdf_message(),
         )
         return self._save(result, inspect)
+
+    def _no_pdf_message(self) -> str:
+        message = "No directly downloadable PDF found in the configured sources"
+        if "scihub" in self.config.source_order and "scihub" not in self.providers:
+            message += "; Sci-Hub fallback is disabled (set SCIHUB_BASE_URL or use --scihub-url)"
+        return message
 
     def _save(self, result: Result, inspect: bool) -> Result:
         if not inspect:

@@ -6,6 +6,7 @@ import json
 import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import Config
 from .models import Paper, Result
@@ -32,6 +33,7 @@ def _parser() -> argparse.ArgumentParser:
             entry.add_argument("--title", help="Explicitly provide a paper title")
         entry.add_argument("--output", type=Path, default=Path("downloads"))
         entry.add_argument("--source-order", default="openalex,scihub")
+        entry.add_argument("--scihub-url", help="Enable the optional Sci-Hub fallback for this run")
         entry.add_argument("--prefer-published", action="store_true")
         entry.add_argument("--non-interactive", action="store_true")
         entry.add_argument("--json", action="store_true", help="Print one JSON object per query")
@@ -130,11 +132,18 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("input file has no queries")
         if args.report and args.report.suffix.lower() not in {".json", ".csv"}:
             parser.error("--report must end in .json or .csv")
-    config = Config.from_env(
+    config_options = dict(
         output_dir=args.output, source_order=source_order,
         prefer_published=args.prefer_published, force=args.force,
         non_interactive=args.non_interactive or args.command == "batch" or not sys.stdin.isatty(),
     )
+    if args.scihub_url:
+        config_options["scihub_base_url"] = args.scihub_url
+    config = Config.from_env(**config_options)
+    if config.scihub_base_url:
+        parsed = urlparse(config.scihub_base_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            parser.error("Sci-Hub URL must be HTTPS with a host name")
     if source_order == ("scihub",) and not config.scihub_base_url:
         parser.error("SCIHUB_BASE_URL is required when Sci-Hub is the only source")
     results: list[Result] = []

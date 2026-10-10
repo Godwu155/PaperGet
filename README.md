@@ -58,6 +58,8 @@ $env:SCIHUB_BASE_URL = "https://sci-hub.al/"
 paperget inspect 10.1128/AEM.01532-09 --source-order openalex,scihub
 ```
 
+也可以只为一次运行指定入口，例如 `paperget get 10.1038/nsmb.2660 --scihub-url https://sci-hub.al/ --output downloads`。若未配置后备来源且开放元数据没有直接 PDF，结果会明确提示后备来源未启用。
+
 该适配器按 `GET /{doi}` 读取网页，提取 PDF 嵌入或链接，并排除已知的隐藏模板和广告框；它还会核对页面引文中的 DOI。它不处理验证码、登录或访问限制。`sci-hub.al` 在一个开放获取 DOI 上通过完整 GET 下载成功；同一 PDF 地址的 HEAD 与分段请求曾返回 403，因此**不能保证其他论文或网络环境也可用**。403 会作为失败原因报告，不会尝试代理轮换或绕过。未设置 `SCIHUB_BASE_URL` 时仅使用开放来源。
 
 ## Python API

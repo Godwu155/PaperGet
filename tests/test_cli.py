@@ -15,12 +15,13 @@ DOI = "10.1371/journal.pone.0000001"
 class Response:
     status_code = 200
 
-    def __init__(self, url, *, data=None, body=b"", invalid=False):
+    def __init__(self, url, *, data=None, body=b"", invalid=False, text=""):
         self.url = url
         self.data = data
         self.body = body
         self.invalid = invalid
-        self.headers = {"Content-Type": "application/pdf" if body else "application/json"}
+        self.text = text
+        self.headers = {"Content-Type": "text/html" if text else "application/pdf" if body else "application/json"}
 
     def json(self):
         if self.invalid:
@@ -43,10 +44,17 @@ class Http:
         if "api.openalex.org" in url:
             location = {"is_oa": True, "pdf_url": "https://example.org/article.pdf"}
             return Response(url, data={"best_oa_location": location, "locations": [location]})
+        if "sci-hub.al" in url:
+            return Response(url, text='<div id="citation">doi:10.1371/journal.pone.0000001</div><embed id="pdf" src="https://example.org/article.pdf">')
         return Response(url, body=b"%PDF-1.7\nexample content")
 
 
 class CliTests(unittest.TestCase):
+    def test_scihub_url_requires_https(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            main(["get", DOI, "--scihub-url", "http://sci-hub.al/"])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_batch_continues_after_invalid_title_response_and_exports_results(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             root = Path(directory)
@@ -64,6 +72,16 @@ class CliTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["export", "--output", str(output), "--file", str(root / "all.csv"), "--format", "csv"]), 0)
             self.assertIn("invalid_response", (root / "all.csv").read_text(encoding="utf-8-sig"))
+
+    def test_scihub_url_enables_fallback_for_one_command(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with patch("paperget.service.HttpClient", return_value=Http()), contextlib.redirect_stdout(io.StringIO()):
+                code = main([
+                    "get", DOI, "--source-order", "scihub",
+                    "--scihub-url", "https://sci-hub.al/", "--output", directory,
+                ])
+            self.assertEqual(code, 0)
+            self.assertEqual(len(list(Path(directory).glob("*.pdf"))), 1)
 
 
 if __name__ == "__main__":

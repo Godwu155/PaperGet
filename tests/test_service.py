@@ -51,6 +51,19 @@ class Http:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_missing_pdf_explains_disabled_fallback(self):
+        class NoPdf(Http):
+            def get(self, url, **kwargs):
+                if "api.openalex.org" in url:
+                    return Response(url, data={"best_oa_location": None, "locations": []})
+                return super().get(url, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with PaperGetService(Config(output_dir=Path(directory)), http=NoPdf()) as service:
+                result = service.fetch(DOI)
+                self.assertEqual((result.status, result.error_code), ("not_found", "no_pdf"))
+                self.assertIn("--scihub-url", result.message)
+
     def test_fallback_and_existing_file(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             http = Http(block_first=True)
