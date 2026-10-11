@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 
+from paperget.errors import PaperGetError
 from paperget.models import Paper
 from paperget.providers.openalex import OpenAlexProvider
 from paperget.providers.scihub import SciHubProvider, _PdfLinks
@@ -35,6 +36,21 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0].version, "publishedVersion")
 
+    def test_openalex_404_has_distinct_reason(self):
+        class NotFound:
+            status_code = 404
+
+            def close(self):
+                pass
+
+        class Site:
+            def get(self, *_args, **_kwargs):
+                return NotFound()
+
+        provider = OpenAlexProvider(Site())
+        self.assertEqual(provider.find(Paper("10.1234/missing")), [])
+        self.assertEqual(provider.last_empty_reason, "work_not_found")
+
     def test_scihub_html_parser_extracts_embedded_pdf(self):
         parser = _PdfLinks()
         parser.feed('<iframe src="//example.org/article.pdf"></iframe><a href="/about">About</a>')
@@ -59,8 +75,10 @@ class ProviderTests(unittest.TestCase):
             def get(self, *_args, **_kwargs):
                 return Page()
 
-        found = SciHubProvider(Site(), "https://sci-hub.al/").find(Paper("10.1234/absent"))
+        provider = SciHubProvider(Site(), "https://sci-hub.al/")
+        found = provider.find(Paper("10.1234/absent"))
         self.assertEqual(found, [])
+        self.assertEqual(provider.last_empty_reason, "no_pdf_link")
 
     def test_scihub_rejects_page_for_different_doi(self):
         class Page:
@@ -77,3 +95,21 @@ class ProviderTests(unittest.TestCase):
                 return Page()
 
         self.assertEqual(SciHubProvider(Site(), "https://sci-hub.al/").find(Paper("10.1234/requested")), [])
+
+    def test_scihub_challenge_page_is_distinct_from_missing_pdf(self):
+        class Page:
+            status_code = 200
+            headers = {"Content-Type": "text/html"}
+            url = "https://sci-hub.al/10.1234/example"
+            text = "<html><body>Verify you are human to continue</body></html>"
+
+            def close(self):
+                pass
+
+        class Site:
+            def get(self, *_args, **_kwargs):
+                return Page()
+
+        with self.assertRaises(PaperGetError) as raised:
+            SciHubProvider(Site(), "https://sci-hub.al/").find(Paper("10.1234/example"))
+        self.assertEqual(raised.exception.code, "challenge_required")

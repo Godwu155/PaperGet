@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlparse, urlsplit
 
@@ -67,26 +68,37 @@ class SciHubProvider:
             raise PaperGetError("invalid_url", "Sci-Hub base URL must be HTTPS")
         self.http = http
         self.base_url = base_url.rstrip("/") + "/"
+        self.last_empty_reason: str | None = None
 
     def find(self, paper: Paper) -> list[Candidate]:
+        self.last_empty_reason = None
         url = urljoin(self.base_url, quote(paper.doi, safe="/"))
         response = self.http.get(url)
         try:
             if response.status_code == 404:
+                self.last_empty_reason = "page_not_found"
                 return []
             if "application/pdf" in response.headers.get("Content-Type", "").lower():
                 return [Candidate(url=response.url, source=self.name)]
             if "html" not in response.headers.get("Content-Type", "").lower():
+                self.last_empty_reason = "unsupported_content"
                 return []
             parser = _PdfLinks()
             parser.feed(response.text)
             page_url = response.url
+            challenge_hint = bool(re.search(
+                r"hcaptcha|recaptcha|turnstile|captcha|verify you are human|checking your browser",
+                response.text, re.IGNORECASE,
+            ))
         finally:
             response.close()
         links: list[Candidate] = []
         citation_doi = normalize_doi(" ".join(parser.citation))
         if citation_doi and citation_doi != paper.doi.lower():
+            self.last_empty_reason = "doi_mismatch"
             return []
+        if not parser.links and challenge_hint:
+            raise PaperGetError("challenge_required", "Sci-Hub page may require human verification")
         seen: set[str] = set()
         for raw in parser.links:
             candidate_url = urljoin(page_url, raw)
@@ -95,4 +107,6 @@ class SciHubProvider:
                 continue
             seen.add(candidate_url)
             links.append(Candidate(url=candidate_url, source=self.name, landing_page_url=page_url))
+        if not links:
+            self.last_empty_reason = "no_pdf_link"
         return links

@@ -6,7 +6,7 @@ from collections import deque
 import os
 from pathlib import Path
 from tempfile import TemporaryFile
-from urllib.parse import urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 from PySide6.QtCore import QObject, QSettings, QStandardPaths, Qt, QThread, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QPalette
@@ -34,6 +34,15 @@ ERROR = {
     "invalid_pdf": "来源返回的不是有效 PDF", "disk_error": "文件写入失败",
     "no_pdf": "没有可直接下载的 PDF", "invalid_response": "来源返回的数据无效",
     "ambiguous_title": "标题有多个候选，请先选定 DOI",
+    "challenge_required": "来源可能需要人机验证；请在浏览器中查看",
+    "no_pdf_link": "来源页面没有可识别的 PDF 链接",
+    "no_open_pdf": "开放元数据没有直接 PDF 链接",
+    "work_not_found": "OpenAlex 没有这篇 DOI 的记录",
+    "page_not_found": "来源页面返回 404",
+    "unsupported_content": "来源返回的不是网页或 PDF",
+    "doi_mismatch": "来源页面引用了其他 DOI",
+    "source_disabled": "来源未启用",
+    "too_large": "PDF 超过设置的大小上限",
 }
 
 
@@ -197,6 +206,76 @@ class SettingsDialog(QDialog):
         self.accept()
 
 
+class BatchPreviewDialog(QDialog):
+    def __init__(self, queries: list[str], parent: QWidget):
+        super().__init__(parent)
+        self.setWindowTitle("预览批量任务")
+        self.resize(650, 440)
+        seen: set[str] = set()
+        self.queries: list[str] = []
+        for query in queries:
+            key = normalize_doi(query) or " ".join(query.split()).casefold()
+            if key not in seen:
+                seen.add(key)
+                self.queries.append(query)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            f"读取 {len(queries)} 条；去重后 {len(self.queries)} 条。确认后加入串行队列。"
+        ))
+        table = QTableWidget()
+        _configure_table(table, ["序号", "DOI 或标题"])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        shown = self.queries[:100]
+        table.setRowCount(len(shown))
+        for row, query in enumerate(shown):
+            table.setItem(row, 0, _item(row + 1))
+            table.setItem(row, 1, _item(query))
+        layout.addWidget(table)
+        if len(self.queries) > len(shown):
+            layout.addWidget(QLabel(f"仅预览前 {len(shown)} 条；确认后处理全部。"))
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("加入队列")
+        buttons.button(QDialogButtonBox.Ok).setEnabled(bool(self.queries))
+        buttons.button(QDialogButtonBox.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+class DiagnosticsDialog(QDialog):
+    def __init__(self, rows: list[dict], parent: QWidget):
+        super().__init__(parent)
+        self.setWindowTitle("来源诊断")
+        self.resize(830, 440)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            f"找到 {len(rows)} 条来源事件。旧版记录可能没有诊断详情。"
+        ))
+        table = QTableWidget()
+        _configure_table(table, ["时间", "来源", "阶段", "结果", "错误码", "候选数", "主机 / 说明"])
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        table.setRowCount(len(rows))
+        stages = {"discovery": "查找链接", "download": "下载", "import": "手动导入"}
+        states = {"found": "已找到", "empty": "无链接", "failed": "失败",
+                  "downloaded": "成功", "disabled": "未启用", "skipped": "跳过"}
+        for row, record in enumerate(rows):
+            values = (
+                record.get("created_at") or "", record.get("source") or "",
+                stages.get(record.get("stage"), record.get("stage") or ""),
+                states.get(record.get("status"), record.get("status") or ""),
+                ERROR.get(record.get("error_code"), record.get("error_code") or ""),
+                record.get("candidate_count") or 0,
+                " / ".join(filter(None, (record.get("host"), record.get("message")))),
+            )
+            for col, value in enumerate(values):
+                table.setItem(row, col, _item(value))
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class TaskWorker(QObject):
     completed = Signal(object)
     failed = Signal(str)
@@ -226,6 +305,7 @@ class MainWindow(QMainWindow):
         self.last_result: Result | None = None
         self.sources = []
         self.pending: deque[tuple[int, str]] = deque()
+        self.queue_paused = False
         self._pending_inspect = False
         self.active_row: int | None = None
         self._thread: QThread | None = None
@@ -309,18 +389,34 @@ class MainWindow(QMainWindow):
         queue_toolbar = QHBoxLayout()
         import_button = QPushButton("导入 TXT/CSV")
         import_button.clicked.connect(self._import)
+        self.pause_button = QPushButton("暂停队列")
+        self.pause_button.clicked.connect(self._toggle_queue)
         cancel_button = QPushButton("移除等待项")
         cancel_button.clicked.connect(self._cancel_pending)
         retry_button = QPushButton("重试选中项")
         retry_button.clicked.connect(self._retry_queue)
-        queue_open = QPushButton("打开 PDF")
-        queue_open.clicked.connect(self._open_queue_pdf)
+        retry_failed = QPushButton("重试失败项")
+        retry_failed.clicked.connect(self._retry_failed)
         queue_toolbar.addWidget(import_button)
+        queue_toolbar.addWidget(self.pause_button)
         queue_toolbar.addWidget(cancel_button)
         queue_toolbar.addWidget(retry_button)
-        queue_toolbar.addWidget(queue_open)
+        queue_toolbar.addWidget(retry_failed)
         queue_toolbar.addStretch()
         queue_layout.addLayout(queue_toolbar)
+        queue_manual = QHBoxLayout()
+        queue_open = QPushButton("打开 PDF")
+        queue_open.clicked.connect(self._open_queue_pdf)
+        queue_browser = QPushButton("浏览器处理")
+        queue_browser.clicked.connect(self._open_queue_browser)
+        queue_attach = QPushButton("导入本地 PDF")
+        queue_attach.clicked.connect(self._attach_queue_pdf)
+        queue_diagnostics = QPushButton("查看原因")
+        queue_diagnostics.clicked.connect(self._diagnostics_queue)
+        for button in (queue_open, queue_browser, queue_attach, queue_diagnostics):
+            queue_manual.addWidget(button)
+        queue_manual.addStretch()
+        queue_layout.addLayout(queue_manual)
         self.queue_table = QTableWidget()
         _configure_table(self.queue_table, ["论文 / DOI", "状态", "说明", "文件"])
         queue_layout.addWidget(self.queue_table)
@@ -343,6 +439,17 @@ class MainWindow(QMainWindow):
             history_toolbar.addWidget(button)
         history_toolbar.addStretch()
         history_layout.addLayout(history_toolbar)
+        history_diagnostics = QHBoxLayout()
+        history_reason = QPushButton("查看来源诊断")
+        history_reason.clicked.connect(self._diagnostics_history)
+        history_attach = QPushButton("导入本地 PDF")
+        history_attach.clicked.connect(self._attach_history_pdf)
+        history_export_diagnostics = QPushButton("导出诊断 JSON/CSV")
+        history_export_diagnostics.clicked.connect(self._export_diagnostics)
+        for button in (history_reason, history_attach, history_export_diagnostics):
+            history_diagnostics.addWidget(button)
+        history_diagnostics.addStretch()
+        history_layout.addLayout(history_diagnostics)
         filters = QHBoxLayout()
         self.history_filter = QLineEdit()
         self.history_filter.setPlaceholderText("筛选标题或 DOI")
@@ -418,13 +525,15 @@ class MainWindow(QMainWindow):
         self._thread = thread
         self._worker = worker
         self._set_status({"search": "检索标题中…", "inspect": "检查 PDF 来源中…", "download": "下载中…",
-                          "history": "读取历史中…", "import": "读取文件中…", "export": "导出中…"}.get(task.kind, "处理中…"))
+                          "attach_pdf": "导入 PDF 中…", "diagnostics": "读取来源诊断中…",
+                          "export_diagnostics": "导出诊断中…", "history": "读取历史中…",
+                          "import": "读取文件中…", "export": "导出中…"}.get(task.kind, "处理中…"))
         self._update_actions()
         thread.start()
         return True
 
     def _thread_finished(self) -> None:
-        was_download = self._task is not None and self._task.kind == "download"
+        was_download = self._task is not None and self._task.kind in {"download", "attach_pdf"}
         self._thread = None
         self._worker = None
         self._task = None
@@ -532,7 +641,7 @@ class MainWindow(QMainWindow):
         self._next_download()
 
     def _next_download(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None or self.queue_paused:
             return
         while self.pending:
             row, query = self.pending.popleft()
@@ -549,13 +658,88 @@ class MainWindow(QMainWindow):
             return
         row = self.active_row
         self.queue_table.item(row, 1).setText(STATUS.get(result.status, result.status))
-        self.queue_table.item(row, 2).setText(ERROR.get(result.error_code, result.message or result.source or ""))
+        explanation = ("没有直接链接；请查看原因或在浏览器处理" if result.error_code == "no_pdf" else
+                       ERROR.get(result.error_code, result.message or result.source or ""))
+        self.queue_table.item(row, 2).setText(explanation)
         self.queue_table.item(row, 2).setToolTip(result.message or "")
         self.queue_table.item(row, 3).setText(str(result.path or ""))
         self._set_status(f"{STATUS.get(result.status, result.status)}：{result.query}")
         if result.status == "ambiguous":
             self.query.setText(result.query)
             self._set_status("该标题需要选择候选 DOI；已放入搜索框。")
+
+    def _toggle_queue(self) -> None:
+        self.queue_paused = not self.queue_paused
+        self.pause_button.setText("继续队列" if self.queue_paused else "暂停队列")
+        self._set_status("队列已暂停；当前任务完成后停止。" if self.queue_paused else "队列继续处理。")
+        if not self.queue_paused:
+            self._next_download()
+
+    def _retry_failed(self) -> None:
+        queries = [self.queue_table.item(row, 0).text()
+                   for row in range(self.queue_table.rowCount())
+                   if self.queue_table.item(row, 1).text() in {"失败", "未找到 PDF"}]
+        for query in dict.fromkeys(queries):
+            self._enqueue(query)
+        self._set_status(f"已将 {len(set(queries))} 个失败项加入队列。" if queries else "没有可重试的失败项。")
+
+    def _queue_query(self) -> str | None:
+        row = self.queue_table.currentRow()
+        return self.queue_table.item(row, 0).text() if row >= 0 else None
+
+    def _history_query(self) -> str | None:
+        row = self.history_table.currentRow()
+        if row < 0:
+            return None
+        query, doi = self.history_table.item(row, 0).data(Qt.UserRole)
+        return doi or query
+
+    def _open_queue_browser(self) -> None:
+        doi = normalize_doi(self._queue_query() or "")
+        if not doi:
+            self._set_status("请先选择含 DOI 的任务。")
+            return
+        config = _config(self.settings)
+        url = (urljoin(config.scihub_base_url.rstrip("/") + "/", quote(doi, safe="/"))
+               if config.scihub_base_url else f"https://doi.org/{quote(doi, safe='/')}")
+        QDesktopServices.openUrl(QUrl(url))
+        self._set_status("已在浏览器打开来源页；手动下载后可导入本地 PDF。")
+
+    def _attach_queue_pdf(self) -> None:
+        self._attach_pdf(self._queue_query())
+
+    def _attach_history_pdf(self) -> None:
+        self._attach_pdf(self._history_query())
+
+    def _attach_pdf(self, query: str | None) -> None:
+        doi = normalize_doi(query or "")
+        if not doi:
+            self._set_status("请先选择已确认 DOI 的论文。")
+            return
+        if self._thread is not None:
+            self._set_status("请等待当前任务完成后导入 PDF。")
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "选择已下载的 PDF", "", "PDF (*.pdf)")
+        if not path:
+            return
+        row = self.queue_table.rowCount()
+        self.queue_table.insertRow(row)
+        for col, value in enumerate((doi, "导入中", "", "")):
+            self.queue_table.setItem(row, col, _item(value))
+        self.active_row = row
+        self._run_task(Task("attach_pdf", query=doi, path=Path(path)))
+
+    def _diagnostics_queue(self) -> None:
+        self._request_diagnostics(self._queue_query())
+
+    def _diagnostics_history(self) -> None:
+        self._request_diagnostics(self._history_query())
+
+    def _request_diagnostics(self, query: str | None) -> None:
+        if not query:
+            self._set_status("请先选择一条记录。")
+            return
+        self._run_task(Task("diagnostics", query=query))
 
     def _import(self) -> None:
         if self._thread is not None:
@@ -661,6 +845,17 @@ class MainWindow(QMainWindow):
         format = "json" if selected.startswith("JSON") or path.lower().endswith(".json") else "csv"
         self._run_task(Task("export", path=Path(path), format=format))
 
+    def _export_diagnostics(self) -> None:
+        if self._thread is not None:
+            self._set_status("请等待当前任务完成后导出。")
+            return
+        path, selected = QFileDialog.getSaveFileName(self, "导出来源诊断", "paperget-diagnostics.csv",
+                                                       "CSV (*.csv);;JSON (*.json)")
+        if not path:
+            return
+        format = "json" if selected.startswith("JSON") or path.lower().endswith(".json") else "csv"
+        self._run_task(Task("export_diagnostics", path=Path(path), format=format))
+
     def _settings(self) -> None:
         if self._thread is not None:
             self._set_status("请等待当前任务结束后再更改设置。")
@@ -678,20 +873,26 @@ class MainWindow(QMainWindow):
             self._show_search(value)
         elif task.kind == "inspect":
             self._show_inspect(value)
-        elif task.kind == "download":
+        elif task.kind in {"download", "attach_pdf"}:
             self._show_download(value)
         elif task.kind == "import":
-            for query in value:
-                self._enqueue(query)
-            self._set_status(f"已导入 {len(value)} 条，开始依次处理。")
+            preview = BatchPreviewDialog(value, self)
+            if preview.exec() == QDialog.Accepted:
+                for query in preview.queries:
+                    self._enqueue(query)
+                self._set_status(f"已加入 {len(preview.queries)} 条；" + ("队列已暂停。" if self.queue_paused else "开始依次处理。"))
+            else:
+                self._set_status("已取消批量导入。")
         elif task.kind == "history":
             self._show_history(value)
-        elif task.kind == "export":
+        elif task.kind == "diagnostics":
+            DiagnosticsDialog(value, self).exec()
+        elif task.kind in {"export", "export_diagnostics"}:
             self._set_status(f"已导出：{value}")
 
     @Slot(str)
     def _failed(self, message: str) -> None:
-        if self._task and self._task.kind == "download" and self.active_row is not None:
+        if self._task and self._task.kind in {"download", "attach_pdf"} and self.active_row is not None:
             self.queue_table.item(self.active_row, 1).setText("失败")
             self.queue_table.item(self.active_row, 2).setText(message)
         self._set_status(f"操作失败：{message}")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperget"
-version = "0.3.0.dev0"
+version = "0.3.0.dev1"
 description = "A DOI and title based research paper downloader"
 readme = "README.md"
 requires-python = ">=3.11"

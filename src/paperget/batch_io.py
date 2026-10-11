@@ -11,6 +11,10 @@ REPORT_FIELDS = (
     "query", "doi", "title", "status", "path", "source", "version",
     "sha256", "error_code", "message",
 )
+DIAGNOSTIC_FIELDS = (
+    "run_id", "query", "doi", "source", "stage", "status", "error_code",
+    "message", "candidate_count", "host", "created_at",
+)
 
 
 def read_queries(path: Path, column: str = "doi_or_title") -> list[str]:
@@ -26,7 +30,7 @@ def read_queries(path: Path, column: str = "doi_or_title") -> list[str]:
         return [value for line in stream if (value := line.strip()) and not value.startswith("#")]
 
 
-def write_report(path: Path, rows: list[dict], format: str) -> None:
+def write_report(path: Path, rows: list[dict], format: str, fields=REPORT_FIELDS) -> None:
     if format not in {"json", "csv"}:
         raise ValueError("report format must be json or csv")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,6 +38,6 @@ def write_report(path: Path, rows: list[dict], format: str) -> None:
         path.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     else:
         with path.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.DictWriter(stream, fieldnames=REPORT_FIELDS, extrasaction="ignore")
+            writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(rows)

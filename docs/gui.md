@@ -13,7 +13,11 @@
 
 GUI 直接调用 `PaperGetService.search_title()`、`fetch(inspect=True)`、`fetch()`；批量 I/O 使用 `paperget.batch_io`。工作线程在执行任务时创建并关闭 service 与 SQLite 连接，不跨线程传递数据库连接。GUI 与 CLI 共享业务逻辑。
 
-下载队列一次处理一项。状态包括等待、下载中、已下载、已有文件、未找到 PDF、需选择论文、失败和已移除。`forbidden`、`rate_limited`、`invalid_pdf` 等错误映射为中文说明，原始消息保留在记录中。标题歧义要求用户选定 DOI，不自动挑选第一篇。
+下载队列一次处理一项。TXT/CSV 导入先预览并去重；可暂停后续项、重试失败项，活动任务完成后才暂停。暂停队列只保存在当前 GUI 进程中，关闭窗口不会保留尚未运行的任务。状态包括等待、下载中、已下载、已有文件、未找到 PDF、需选择论文、失败和已移除。`forbidden`、`rate_limited`、`challenge_required`、`invalid_pdf` 等错误映射为中文说明。标题歧义要求用户选定 DOI，不自动挑选第一篇。
+
+来源诊断保存在 `source_events` 表，按一次查询的运行 ID 记录每个来源的发现、下载或人工导入结果。GUI 可按 DOI 查看并导出全部诊断为 JSON/CSV；记录主机名和简要原因，不保留带查询令牌的 PDF URL。OpenAlex DOI 缺失、元数据没有 PDF、Sci-Hub 页面无链接、疑似人机验证及实际下载失败分别呈现。旧 SQLite 数据库打开时自动创建新表，已有结果和文件不移动。
+
+人工处理入口使用系统浏览器打开配置的来源页。用户手动取得 PDF 后可选择文件导入；导入过程在工作线程验证 `%PDF-` 文件头、大小上限并原子复制到输出目录，关联 DOI、来源 `manual` 和 SHA-256，更新历史。导入不依赖网络，也不尝试自动处理验证码。
 
 服务层尚无字节级进度和合作式取消回调，因此界面只显示当前阶段；正在处理的任务不可强制中止。更细的进度和取消应先在服务层设计回调，再接入界面。
 
@@ -56,3 +60,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 - Windows 独立程序已启动验证，运行时工作目录不同于仓库且未设置 `PYTHONPATH`。ZIP 分发包 SHA-256：`EE8EEC0DA004C508D7AE216126E0F366E522C8B3DCB57D02866F87E19C8C9734`。
 
 此版仍需在另一台干净 Windows 机器上验收打包程序的完整下载、系统缩放和不同网络错误场景，作为 v0.3 正式发布门槛。
+
+## 2026-10-11 开发预览验证
+
+- 51 项自动化测试通过，新增来源诊断、疑似人机验证、人工 PDF 导入、批量预览与队列控制的测试。
+- 对 `10.1109/ICCV51070.2023.00371` 的真实检查返回 `not_found`，并分别记录 OpenAlex 缺少直接 PDF 与 Sci-Hub 页面没有可识别 PDF 链接；此样本没有检测到人机验证。
+- `PaperGet.exe` 从与程序目录不同的工作目录启动成功，`PaperGet-windows-v0.3.0.dev1.zip` 包含可执行文件和 74 个运行文件，SHA-256：`1CD1A29626F8FC2E18EF16AB9881EC5B9A55DF0D118DFB6E0B5A330DBFCDE5B3`。
+- 仍需在另一台干净 Windows 机器上验证中文显示、设置读写和完整下载流程。

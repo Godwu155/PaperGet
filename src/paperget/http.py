@@ -16,7 +16,7 @@ class HttpClient:
 
     def __init__(self, session: requests.Session | None = None, min_interval: float = 1.0):
         self.session = session or requests.Session()
-        self.session.headers["User-Agent"] = "PaperGet/0.2 (+https://github.com/Godwu155/sci-hub-tool)"
+        self.session.headers["User-Agent"] = "PaperGet/0.3 (+https://github.com/Godwu155/sci-hub-tool)"
         self.min_interval = min_interval
         self._last_request: dict[str, float] = {}
 

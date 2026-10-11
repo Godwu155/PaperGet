@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication
-    from paperget.gui_window import MainWindow, SettingsDialog, _config
+    from paperget.gui_window import BatchPreviewDialog, MainWindow, SettingsDialog, _config
     from paperget.gui_backend import Task
 except ImportError:
     QApplication = None
@@ -136,7 +136,9 @@ class GuiSmokeTests(unittest.TestCase):
                 time.sleep(0.01)
             self.wait_idle(window)
             self.assertEqual(window.queue_table.item(0, 1).text(), "已下载")
-            self.assertEqual([kind for kind, _ in calls[:4]], ["history", "search", "inspect", "download"])
+            kinds = [kind for kind, _ in calls]
+            self.assertLess(kinds.index("search"), kinds.index("inspect"))
+            self.assertLess(kinds.index("inspect"), kinds.index("download"))
             window._show_history([{"query": "10.1234/example", "doi": "10.1234/example",
                                    "title": "Example Paper", "status": "downloaded",
                                    "source": "openalex", "updated_at": "2026-10-10", "path": "missing.pdf"}])
@@ -160,7 +162,8 @@ class GuiSmokeTests(unittest.TestCase):
                 return Result(task.query, "downloaded", doi=task.query, source="openalex")
             raise AssertionError(task.kind)
 
-        with patch("paperget.gui_window.perform", side_effect=fake_perform):
+        with patch("paperget.gui_window.perform", side_effect=fake_perform), \
+             patch("paperget.gui_window.BatchPreviewDialog.exec", return_value=1):
             window = MainWindow()
             self.wait_idle(window)
             window._run_task(Task("import", path=Path("fake.txt")))
@@ -174,6 +177,65 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertEqual(window.queue_table.item(0, 1).text(), "失败")
             self.assertEqual(window.queue_table.item(1, 1).text(), "已下载")
             self.assertEqual(window.query.text(), "Window remains responsive")
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_batch_preview_deduplicates_and_pause_defers_download(self):
+        preview = BatchPreviewDialog(["10.1234/A", "10.1234/a", "Different title"], None)
+        self.assertEqual(preview.queries, ["10.1234/A", "Different title"])
+        preview.deleteLater()
+        calls = []
+
+        def fake_perform(task, _config):
+            calls.append(task.kind)
+            if task.kind == "history":
+                return []
+            if task.kind == "download":
+                return Result(task.query, "downloaded", doi=task.query)
+            raise AssertionError(task.kind)
+
+        with patch("paperget.gui_window.perform", side_effect=fake_perform):
+            window = MainWindow()
+            self.wait_idle(window)
+            window._toggle_queue()
+            window._enqueue("10.1234/a")
+            self.assertEqual(calls, ["history"])
+            self.assertEqual(window.queue_table.item(0, 1).text(), "等待")
+            window._toggle_queue()
+            for _ in range(200):
+                self.app.processEvents()
+                if window.queue_table.item(0, 1).text() == "已下载":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(window.queue_table.item(0, 1).text(), "已下载")
+            self.wait_idle(window)
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_manual_pdf_action_records_queue_result(self):
+        def fake_perform(task, _config):
+            if task.kind == "history":
+                return []
+            if task.kind == "attach_pdf":
+                return Result(task.query, "downloaded", doi=task.query,
+                              path=task.path, source="manual")
+            raise AssertionError(task.kind)
+
+        with patch("paperget.gui_window.perform", side_effect=fake_perform), \
+             patch("paperget.gui_window.QFileDialog.getOpenFileName", return_value=("C:/picked.pdf", "PDF")):
+            window = MainWindow()
+            self.wait_idle(window)
+            window._attach_pdf("10.1234/example")
+            for _ in range(200):
+                self.app.processEvents()
+                if window.queue_table.item(0, 1).text() == "已下载":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(window.queue_table.item(0, 1).text(), "已下载")
+            self.assertEqual(window.queue_table.item(0, 3).text(), str(Path("C:/picked.pdf")))
+            self.wait_idle(window)
             window.close()
             window.deleteLater()
             self.app.processEvents()

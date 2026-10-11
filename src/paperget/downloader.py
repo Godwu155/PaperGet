@@ -75,6 +75,7 @@ class Downloader:
                         raise PaperGetError("too_large", "PDF exceeds configured size limit")
                 except ValueError:
                     pass
+
             with tempfile.NamedTemporaryFile(
                 mode="wb", prefix=destination.stem + "_", suffix=".part",
                 dir=destination.parent, delete=False,
@@ -104,6 +105,48 @@ class Downloader:
             raise PaperGetError("disk_error", str(exc)) from exc
         finally:
             response.close()
+            if temp is not None:
+                try:
+                    temp.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+    def import_file(self, source: Path, destination: Path) -> str:
+        """Copy a user-provided PDF through the same size and header checks."""
+        try:
+            if not source.is_file():
+                raise PaperGetError("invalid_input", "Selected PDF file does not exist")
+            size = source.stat().st_size
+        except OSError as exc:
+            raise PaperGetError("disk_error", str(exc)) from exc
+        if size > self.max_bytes:
+            raise PaperGetError("too_large", "PDF exceeds configured size limit")
+        if not pdf_is_valid(source):
+            raise PaperGetError("invalid_pdf", "Selected file is not a valid PDF")
+        if destination.exists() and pdf_is_valid(destination):
+            return self._hash(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp: Path | None = None
+        try:
+            with source.open("rb") as input_file, tempfile.NamedTemporaryFile(
+                mode="wb", prefix=destination.stem + "_", suffix=".part",
+                dir=destination.parent, delete=False,
+            ) as output_file:
+                temp = Path(output_file.name)
+                digest = hashlib.sha256()
+                size = 0
+                for chunk in iter(lambda: input_file.read(65536), b""):
+                    size += len(chunk)
+                    if size > self.max_bytes:
+                        raise PaperGetError("too_large", "PDF exceeds configured size limit")
+                    digest.update(chunk)
+                    output_file.write(chunk)
+            os.replace(temp, destination)
+            temp = None
+            return digest.hexdigest()
+        except OSError as exc:
+            raise PaperGetError("disk_error", str(exc)) from exc
+        finally:
             if temp is not None:
                 try:
                     temp.unlink(missing_ok=True)

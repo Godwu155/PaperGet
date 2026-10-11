@@ -6,7 +6,7 @@ from pathlib import Path
 from paperget.config import Config
 from paperget.downloader import filename_for_doi, filename_for_paper
 from paperget.errors import PaperGetError
-from paperget.models import Paper
+from paperget.models import Paper, Result
 from paperget.service import PaperGetService
 
 
@@ -65,6 +65,9 @@ class ServiceTests(unittest.TestCase):
                 result = service.fetch(DOI)
                 self.assertEqual((result.status, result.error_code), ("not_found", "no_pdf"))
                 self.assertIn("--scihub-url", result.message)
+                events = service.store.diagnostics(DOI)
+                self.assertEqual([(row["source"], row["status"]) for row in events],
+                                 [("scihub", "disabled"), ("openalex", "empty")])
 
     def test_fallback_and_existing_file(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
@@ -82,6 +85,46 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(len(http.calls), before)
                 attempts = service.store.connection.execute("SELECT status FROM attempts ORDER BY id").fetchall()
                 self.assertEqual([row[0] for row in attempts], ["failed", "downloaded"])
+                events = service.store.diagnostics(DOI)
+                self.assertTrue(any(row["stage"] == "download" and row["error_code"] == "forbidden"
+                                    for row in events))
+                self.assertTrue(any(row["stage"] == "download" and row["status"] == "downloaded"
+                                    for row in events))
+
+    def test_import_local_pdf_validates_and_records_manual_source(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            source = root / "picked.pdf"
+            source.write_bytes(b"%PDF-1.7\nmanual content")
+            with PaperGetService(Config(output_dir=root / "output"), http=Http()) as service:
+                service.store.save(Result(query=DOI, status="not_found", doi=DOI, title="Example paper"))
+                result = service.import_pdf(DOI, source)
+                self.assertEqual((result.status, result.source), ("downloaded", "manual"))
+                self.assertTrue(result.path.is_file())
+                self.assertEqual(result.path.name, filename_for_paper("Example paper", DOI))
+                self.assertEqual(service.import_pdf(DOI, source).status, "existing")
+                self.assertEqual(service.store.diagnostics(DOI)[0]["stage"], "import")
+
+    def test_import_local_pdf_rejects_html_without_target_file(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            source = root / "fake.pdf"
+            source.write_text("<html>not a PDF</html>", encoding="utf-8")
+            with PaperGetService(Config(output_dir=root / "output"), http=Http()) as service:
+                result = service.import_pdf(DOI, source)
+                self.assertEqual((result.status, result.error_code), ("failed", "invalid_pdf"))
+                self.assertFalse(list((root / "output").glob("*.pdf")))
+                self.assertEqual(service.store.diagnostics(DOI)[0]["error_code"], "invalid_pdf")
+
+    def test_diagnostic_messages_redact_urls(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with PaperGetService(Config(output_dir=Path(directory)), http=Http()) as service:
+                service._event("run", DOI, DOI, "openalex", "download", "failed",
+                               error_code="connection_error",
+                               message="Failed https://example.org/file.pdf?token=private")
+                message = service.store.diagnostics(DOI)[0]["message"]
+                self.assertIn("[URL]", message)
+                self.assertNotIn("private", message)
 
     def test_legacy_doi_filename_is_reused(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:

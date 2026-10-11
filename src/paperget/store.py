@@ -43,6 +43,14 @@ class Store:
                 source TEXT NOT NULL, query TEXT NOT NULL, payload TEXT NOT NULL,
                 updated_at TEXT NOT NULL, PRIMARY KEY (source, query)
             );
+            CREATE TABLE IF NOT EXISTS source_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL,
+                query TEXT NOT NULL, doi TEXT, source TEXT NOT NULL,
+                stage TEXT NOT NULL, status TEXT NOT NULL, error_code TEXT,
+                message TEXT, candidate_count INTEGER NOT NULL DEFAULT 0,
+                host TEXT, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_source_events_query ON source_events(query, id);
             """
         )
 
@@ -86,6 +94,16 @@ class Store:
         except (sqlite3.Error, TypeError):
             return None
 
+    def paper_title(self, doi: str) -> str:
+        try:
+            row = self.connection.execute(
+                "SELECT title FROM results WHERE doi=? AND title<>'' "
+                "ORDER BY updated_at DESC LIMIT 1", (doi,)
+            ).fetchone()
+            return row[0] if row and isinstance(row[0], str) else ""
+        except sqlite3.Error:
+            return ""
+
     def attempt(self, query: str, candidate: Candidate, status: str, error=None) -> None:
         self.connection.execute(
             "INSERT INTO attempts (query, source, url, status, error_code, message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -93,6 +111,35 @@ class Store:
              getattr(error, "code", None), str(error) if error else None, _now()),
         )
         self.connection.commit()
+
+    def record_source_event(
+        self, run_id: str, query: str, doi: str | None, source: str,
+        stage: str, status: str, *, error_code: str | None = None,
+        message: str | None = None, candidate_count: int = 0,
+        host: str | None = None,
+    ) -> None:
+        self.connection.execute(
+            """INSERT INTO source_events
+            (run_id, query, doi, source, stage, status, error_code,
+             message, candidate_count, host, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (run_id, query, doi, source, stage, status, error_code,
+             message, candidate_count, host, _now()),
+        )
+        self.connection.commit()
+
+    def diagnostics(self, query: str | None = None, limit: int | None = 500) -> list[dict]:
+        self.connection.row_factory = sqlite3.Row
+        if query is None:
+            sql = "SELECT * FROM source_events ORDER BY id DESC"
+            rows = self.connection.execute(sql + (" LIMIT ?" if limit is not None else ""),
+                                           (limit,) if limit is not None else ()).fetchall()
+        else:
+            sql = "SELECT * FROM source_events WHERE query=? OR doi=? ORDER BY id DESC"
+            params = (query, query)
+            rows = self.connection.execute(sql + (" LIMIT ?" if limit is not None else ""),
+                                           params + ((limit,) if limit is not None else ())).fetchall()
+        return [dict(row) for row in rows]
 
     def record_candidates(self, query: str, candidates: list[Candidate]) -> None:
         self.connection.executemany(

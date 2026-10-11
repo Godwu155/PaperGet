@@ -14,8 +14,10 @@ class OpenAlexProvider:
         self.http = http
         self.api_key = api_key
         self.cache = cache
+        self.last_empty_reason: str | None = None
 
     def find(self, paper: Paper) -> list[Candidate]:
+        self.last_empty_reason = None
         work = self.cache.cached("openalex", paper.doi) if self.cache else None
         if work is None:
             headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else None
@@ -26,6 +28,7 @@ class OpenAlexProvider:
             )
             try:
                 if response.status_code == 404:
+                    self.last_empty_reason = "work_not_found"
                     return []
                 work = response.json()
             finally:
@@ -51,4 +54,6 @@ class OpenAlexProvider:
                     landing_page_url=loc.get("landing_page_url"),
                 )
             )
+        if not candidates:
+            self.last_empty_reason = "no_open_pdf"
         return candidates
