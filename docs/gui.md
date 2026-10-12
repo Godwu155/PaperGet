@@ -59,11 +59,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 - 全新 CLI-only 虚拟环境安装后可运行 `paperget --help`，其中没有 PySide6。
 - Windows 独立程序已启动验证，运行时工作目录不同于仓库且未设置 `PYTHONPATH`。ZIP 分发包 SHA-256：`EE8EEC0DA004C508D7AE216126E0F366E522C8B3DCB57D02866F87E19C8C9734`。
 
-此版仍需在另一台干净 Windows 机器上验收打包程序的完整下载、系统缩放和不同网络错误场景，作为 v0.3 正式发布门槛。
+此版的跨机器完整下载验收结果见下方记录；不同网络错误场景仍待补充，作为 v0.3 正式发布门槛。
 
 ## 2026-10-11 开发预览验证
 
 - 51 项自动化测试通过，新增来源诊断、疑似人机验证、人工 PDF 导入、批量预览与队列控制的测试。
 - 对 `10.1109/ICCV51070.2023.00371` 的真实检查返回 `not_found`，并分别记录 OpenAlex 缺少直接 PDF 与 Sci-Hub 页面没有可识别 PDF 链接；此样本没有检测到人机验证。
 - `PaperGet.exe` 从与程序目录不同的工作目录启动成功，`PaperGet-windows-v0.3.0.dev1.zip` 包含可执行文件和 74 个运行文件，SHA-256：`1CD1A29626F8FC2E18EF16AB9881EC5B9A55DF0D118DFB6E0B5A330DBFCDE5B3`。
-- 仍需在另一台干净 Windows 机器上验证中文显示、设置读写和完整下载流程。
+- 本机验收时尚缺跨机器验证；随后收到的结果见下方记录。
+
+## 2026-10-12 跨机器验收反馈
+
+用户确认在另一台电脑使用 `PaperGet-windows-v0.3.0.dev1.zip`，完整下载、中文显示、设置保存和批量下载均正常。Windows 具体版本未记录；此反馈未覆盖缩放比例、断网、403/429、错误 PDF 和不可写目录等边界情况。正式发布前的剩余核对见 [发布准备记录](release-readiness.md)。
