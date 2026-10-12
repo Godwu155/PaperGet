@@ -4,9 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paperget"
-version = "0.3.0.dev1"
+version = "0.3.0.dev2"
 description = "A DOI and title based research paper downloader"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = ["requests>=2.31,<3"]
 
@@ -19,3 +20,6 @@ paperget-gui = "paperget.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+paperget = ["assets/*.ico"]

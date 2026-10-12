@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .batch_io import DIAGNOSTIC_FIELDS, REPORT_FIELDS, read_queries, write_report
+from .batch_io import DIAGNOSTIC_FIELDS, REPORT_FIELDS, read_batch_preview, write_report
 from .config import Config
 from .service import PaperGetService
 from .store import Store
@@ -34,7 +34,7 @@ def perform(task: Task, config: Config):
     if task.kind == "import":
         if task.path is None:
             raise ValueError("No input file selected")
-        return read_queries(task.path, task.column)
+        return read_batch_preview(task.path, task.column)
     if task.kind in {"history", "export", "diagnostics", "export_diagnostics"}:
         database = config.output_dir / "paperget.sqlite3"
         if not database.is_file():

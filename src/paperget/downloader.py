@@ -62,7 +62,10 @@ class Downloader:
     def download(self, url: str, destination: Path, *, force=False) -> str:
         if destination.exists() and not force and pdf_is_valid(destination):
             return self._hash(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise PaperGetError("disk_error", str(exc)) from exc
         response = self.http.get(url, stream=True)
         temp: Path | None = None
         try:
@@ -125,7 +128,10 @@ class Downloader:
             raise PaperGetError("invalid_pdf", "Selected file is not a valid PDF")
         if destination.exists() and pdf_is_valid(destination):
             return self._hash(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise PaperGetError("disk_error", str(exc)) from exc
         temp: Path | None = None
         try:
             with source.open("rb") as input_file, tempfile.NamedTemporaryFile(

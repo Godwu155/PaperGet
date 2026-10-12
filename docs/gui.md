@@ -13,7 +13,7 @@
 
 GUI 直接调用 `PaperGetService.search_title()`、`fetch(inspect=True)`、`fetch()`；批量 I/O 使用 `paperget.batch_io`。工作线程在执行任务时创建并关闭 service 与 SQLite 连接，不跨线程传递数据库连接。GUI 与 CLI 共享业务逻辑。
 
-下载队列一次处理一项。TXT/CSV 导入先预览并去重；可暂停后续项、重试失败项，活动任务完成后才暂停。暂停队列只保存在当前 GUI 进程中，关闭窗口不会保留尚未运行的任务。状态包括等待、下载中、已下载、已有文件、未找到 PDF、需选择论文、失败和已移除。`forbidden`、`rate_limited`、`challenge_required`、`invalid_pdf` 等错误映射为中文说明。标题歧义要求用户选定 DOI，不自动挑选第一篇。
+下载队列一次处理一项。TXT/CSV 导入先预览并去重，空值、明显不完整的 DOI 和不含 DOI 的链接会按行号提示并跳过；可暂停后续项、重试失败项，活动任务完成后才暂停。暂停队列只保存在当前 GUI 进程中，关闭窗口不会保留尚未运行的任务。状态包括等待、下载中、已下载、已有文件、未找到 PDF、需选择论文、失败和已移除。`forbidden`、`rate_limited`、`challenge_required`、`invalid_pdf` 等错误映射为中文说明。标题歧义要求用户选定 DOI，不自动挑选第一篇。
 
 来源诊断保存在 `source_events` 表，按一次查询的运行 ID 记录每个来源的发现、下载或人工导入结果。GUI 可按 DOI 查看并导出全部诊断为 JSON/CSV；记录主机名和简要原因，不保留带查询令牌的 PDF URL。OpenAlex DOI 缺失、元数据没有 PDF、Sci-Hub 页面无链接、疑似人机验证及实际下载失败分别呈现。旧 SQLite 数据库打开时自动创建新表，已有结果和文件不移动。
 
@@ -47,9 +47,11 @@ Remove-Item Env:QT_QPA_PLATFORM
 .venv\Scripts\python -m pip install -e '.[gui]'
 .venv\Scripts\python -m pip install Nuitka==4.1.1
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
+# 若旧版 PaperGet.exe 正在运行，可构建到独立目录：
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1 -OutputDir dist\candidate-v03
 ```
 
-构建结果位于 `dist/windows_main.dist/PaperGet.exe`，需连同整个 `.dist` 目录分发。Nuitka 首次构建可能下载 Windows 依赖分析工具或编译器；再次构建使用缓存。构建后的程序应在干净 Windows 环境验收启动、中文显示、设置读写和开放 DOI 下载。
+默认构建结果位于 `dist/windows_main.dist/PaperGet.exe`，自定义输出目录时位于该目录下的 `windows_main.dist`。需连同整个 `.dist` 目录分发；其中包含应用图标、`THIRD_PARTY_NOTICES.md` 及可用的依赖许可文本。Nuitka 首次构建可能下载 Windows 依赖分析工具或编译器；再次构建使用缓存。构建后的程序应在干净 Windows 环境验收启动、中文显示、设置读写和开放 DOI 下载。
 
 ## 2026-10-10 开发预览验证
 

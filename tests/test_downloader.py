@@ -72,3 +72,26 @@ class DownloaderTests(unittest.TestCase):
                 Downloader(InterruptedHttp()).download("https://example.org/a.pdf", path)
             self.assertEqual(raised.exception.code, "connection_error")
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_unwritable_destination_reports_disk_error_before_network(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            blocking_file = Path(directory) / "not-a-directory"
+            blocking_file.write_text("occupied", encoding="utf-8")
+            http = Http(b"%PDF-1.7\nbody")
+            destination = blocking_file / "article.pdf"
+            with self.assertRaises(PaperGetError) as raised:
+                Downloader(http).download("https://example.org/a.pdf", destination)
+            self.assertEqual(raised.exception.code, "disk_error")
+            self.assertEqual(blocking_file.read_text(encoding="utf-8"), "occupied")
+
+    def test_manual_import_unwritable_destination_reports_disk_error(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            source = root / "source.pdf"
+            source.write_bytes(b"%PDF-1.7\nbody")
+            blocking_file = root / "not-a-directory"
+            blocking_file.write_text("occupied", encoding="utf-8")
+            with self.assertRaises(PaperGetError) as raised:
+                Downloader(Http(b"")).import_file(source, blocking_file / "article.pdf")
+            self.assertEqual(raised.exception.code, "disk_error")
+            self.assertEqual(source.read_bytes(), b"%PDF-1.7\nbody")

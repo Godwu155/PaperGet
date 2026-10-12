@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import deque
+from importlib.resources import files
 import os
 from pathlib import Path
 from tempfile import TemporaryFile
 from urllib.parse import quote, urljoin, urlparse
 
 from PySide6.QtCore import QObject, QSettings, QStandardPaths, Qt, QThread, QUrl, Signal, Slot
-from PySide6.QtGui import QAction, QDesktopServices, QPalette
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -207,7 +208,8 @@ class SettingsDialog(QDialog):
 
 
 class BatchPreviewDialog(QDialog):
-    def __init__(self, queries: list[str], parent: QWidget):
+    def __init__(self, queries: list[str], parent: QWidget,
+                 invalid_rows: list[tuple[int, str]] | None = None):
         super().__init__(parent)
         self.setWindowTitle("预览批量任务")
         self.resize(650, 440)
@@ -219,9 +221,17 @@ class BatchPreviewDialog(QDialog):
                 seen.add(key)
                 self.queries.append(query)
         layout = QVBoxLayout(self)
+        invalid_rows = invalid_rows or []
         layout.addWidget(QLabel(
-            f"读取 {len(queries)} 条；去重后 {len(self.queries)} 条。确认后加入串行队列。"
+            f"有效 {len(queries)} 条；去重后 {len(self.queries)} 条；跳过 {len(invalid_rows)} 行。"
         ))
+        if invalid_rows:
+            details = "；".join(f"第 {line} 行：{reason}" for line, reason in invalid_rows[:5])
+            if len(invalid_rows) > 5:
+                details += f"；另有 {len(invalid_rows) - 5} 行"
+            note = QLabel(details)
+            note.setWordWrap(True)
+            layout.addWidget(note)
         table = QTableWidget()
         _configure_table(table, ["序号", "DOI 或标题"])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -876,7 +886,7 @@ class MainWindow(QMainWindow):
         elif task.kind in {"download", "attach_pdf"}:
             self._show_download(value)
         elif task.kind == "import":
-            preview = BatchPreviewDialog(value, self)
+            preview = self._batch_preview(value)
             if preview.exec() == QDialog.Accepted:
                 for query in preview.queries:
                     self._enqueue(query)
@@ -904,11 +914,19 @@ class MainWindow(QMainWindow):
             return
         event.accept()
 
+    def _batch_preview(self, preview_data) -> BatchPreviewDialog:
+        return BatchPreviewDialog(
+            preview_data.queries, self, preview_data.invalid_rows
+        )
+
 
 def run() -> int:
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("PaperGet")
     app.setOrganizationName("PaperGet")
+    icon_path = files("paperget").joinpath("assets/paperget.ico")
+    if icon_path.is_file():
+        app.setWindowIcon(QIcon(str(icon_path)))
     window = MainWindow()
     window.show()
     return app.exec()

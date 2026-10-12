@@ -9,13 +9,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
     from PySide6.QtCore import QSettings
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QLabel
     from paperget.gui_window import BatchPreviewDialog, MainWindow, SettingsDialog, _config
     from paperget.gui_backend import Task
 except ImportError:
     QApplication = None
 
 from paperget.models import Candidate, Result, SearchResult, TitleMatch
+from paperget.batch_io import BatchPreviewData
 
 
 @unittest.skipUnless(QApplication is not None, "PySide6 GUI extra is not installed")
@@ -74,6 +75,27 @@ class GuiSmokeTests(unittest.TestCase):
             self.app.processEvents()
             settings.sync()
             del dialog, settings
+
+    def test_settings_rejects_file_path_and_non_https_source(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            root = Path(directory)
+            settings = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+            occupied = root / "occupied"
+            occupied.write_text("file", encoding="utf-8")
+            dialog = SettingsDialog(settings, None)
+            with patch("paperget.gui_window.QMessageBox.warning") as warning:
+                dialog.output.setText(str(occupied))
+                dialog._save()
+                self.assertEqual(dialog.result(), SettingsDialog.Rejected)
+                dialog.output.setText(str(root / "papers"))
+                dialog.scihub.setChecked(True)
+                dialog.scihub_url.setText("http://example.org/")
+                dialog._save()
+                self.assertEqual(dialog.result(), SettingsDialog.Rejected)
+            self.assertEqual(warning.call_count, 2)
+            self.assertIsNone(settings.value("scihub_url"))
+            dialog.deleteLater()
+            self.app.processEvents()
 
     def test_gui_key_and_crossref_email_settings(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
@@ -154,7 +176,7 @@ class GuiSmokeTests(unittest.TestCase):
             if task.kind == "history":
                 return []
             if task.kind == "import":
-                return ["10.1234/bad", "10.1234/good"]
+                return BatchPreviewData(["10.1234/bad", "10.1234/good"], [])
             if task.kind == "download":
                 time.sleep(0.03)
                 if task.query.endswith("bad"):
@@ -182,8 +204,10 @@ class GuiSmokeTests(unittest.TestCase):
             self.app.processEvents()
 
     def test_batch_preview_deduplicates_and_pause_defers_download(self):
-        preview = BatchPreviewDialog(["10.1234/A", "10.1234/a", "Different title"], None)
+        preview = BatchPreviewDialog(["10.1234/A", "10.1234/a", "Different title"], None,
+                                     [(4, "DOI 格式不完整")])
         self.assertEqual(preview.queries, ["10.1234/A", "Different title"])
+        self.assertIn("第 4 行", preview.findChildren(QLabel)[1].text())
         preview.deleteLater()
         calls = []
 

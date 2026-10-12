@@ -1,5 +1,7 @@
 # PaperGet
 
+项目代码采用 [MIT 许可证](LICENSE)；Windows 分发包另含第三方组件清单和可用的许可文本。
+
 输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。提供命令行、Windows 图形界面开发版和 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
 
 ## 安装
