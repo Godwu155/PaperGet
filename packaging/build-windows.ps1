@@ -1,5 +1,6 @@
 param(
-    [string]$OutputDir = 'dist'
+    [string]$OutputDir = 'dist',
+    [string]$PythonExe = '.venv\Scripts\python.exe'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,9 +10,17 @@ $outputPath = if ([System.IO.Path]::IsPathRooted($OutputDir)) {
 } else {
     Join-Path $repoRoot $OutputDir
 }
-$pythonExe = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$pythonExe = if ([System.IO.Path]::IsPathRooted($PythonExe)) {
+    $PythonExe
+} else {
+    Join-Path $repoRoot $PythonExe
+}
 if (-not (Test-Path -LiteralPath $pythonExe)) {
-    throw 'Create .venv and install paperget[gui] plus Nuitka before building.'
+    throw 'Create a Python 3.12 virtual environment and install paperget[gui] plus Nuitka before building.'
+}
+$pythonVersion = & $pythonExe -c 'import sys; print(sys.version_info.major, sys.version_info.minor, sep=chr(46))'
+if ($LASTEXITCODE -ne 0 -or $pythonVersion -ne '3.12') {
+    throw "Windows builds currently require Python 3.12; found $pythonVersion."
 }
 
 $env:TMP = Join-Path $repoRoot '.tmp'
@@ -27,6 +36,7 @@ $arguments = @(
     '-m', 'nuitka',
     (Join-Path $PSScriptRoot 'windows_main.py'),
     '--standalone',
+    '--zig',
     '--enable-plugin=pyside6',
     '--include-package=paperget',
     '--include-package-data=paperget',
@@ -43,8 +53,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Windows build failed with exit code $LASTEXITCODE"
 }
 $standaloneDir = Join-Path $outputPath 'windows_main.dist'
-# PaperGet opens PDFs with the system viewer; Qt's PDF image plugin is unused.
-# Keep qt6pdf.dll: Qt also links against it during application startup.
+# Qt Essentials includes the PDF image plugin, which PaperGet never uses.
 $unusedPdfPlugin = Join-Path $standaloneDir 'PySide6\qt-plugins\imageformats\qpdf.dll'
 if (Test-Path -LiteralPath $unusedPdfPlugin) {
     Remove-Item -LiteralPath $unusedPdfPlugin

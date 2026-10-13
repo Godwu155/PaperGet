@@ -16,7 +16,7 @@ python -m venv .venv
 
 ## Windows 图形界面（开发版）
 
-GUI 使用 PySide6 和系统凭据管理器，作为可选依赖安装；只使用命令行时无需安装它们。
+GUI 使用 PySide6 Essentials 和系统凭据管理器，作为可选依赖安装；只使用命令行时无需安装它们。
 
 ```powershell
 .venv\Scripts\python -m pip install -e '.[gui]'

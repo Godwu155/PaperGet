@@ -44,14 +44,19 @@ Remove-Item Env:QT_QPA_PLATFORM
 在 Windows PowerShell 中执行：
 
 ```powershell
+py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -e '.[gui]'
 .venv\Scripts\python -m pip install Nuitka==4.1.1
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 # 若旧版 PaperGet.exe 正在运行，可构建到独立目录：
 powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1 -OutputDir dist\candidate-v03
+# 虚拟环境在其他目录时，可显式指定解释器：
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1 -PythonExe .tmp\venv312lean\Scripts\python.exe -OutputDir dist\candidate-v03
 ```
 
-默认构建结果位于 `dist/windows_main.dist/PaperGet.exe`，自定义输出目录时位于该目录下的 `windows_main.dist`。需连同整个 `.dist` 目录分发；其中包含应用图标、`THIRD_PARTY_NOTICES.md` 及可用的依赖许可文本。Nuitka 首次构建可能下载 Windows 依赖分析工具或编译器；再次构建使用缓存。构建后的程序应在干净 Windows 环境验收启动、中文显示、设置读写和开放 DOI 下载。
+构建脚本要求 Python 3.12，并使用 Nuitka 的 Zig 后端。当前 Python 3.13 构建可能在启动时崩溃，因此脚本会拒绝该版本。GUI 依赖仅安装 PySide6 Essentials；请在全新虚拟环境中构建，避免把不用的 Qt Addons 带入分发包。
+
+默认构建结果位于 `dist/windows_main.dist/PaperGet.exe`，自定义输出目录时位于该目录下的 `windows_main.dist`。需连同整个 `.dist` 目录分发；其中包含应用图标、`THIRD_PARTY_NOTICES.md`、GNU LGPLv3/GPLv3 文本及可用的依赖许可文本。Nuitka 首次构建可能下载 Windows 依赖分析工具或编译器；再次构建使用缓存。构建后的程序应在干净 Windows 环境验收启动、中文显示、设置读写和开放 DOI 下载。
 
 ## 2026-10-10 开发预览验证
 
