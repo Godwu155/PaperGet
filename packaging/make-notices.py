@@ -54,7 +54,9 @@ def write_notices(destination: Path) -> None:
         "# Third-party components",
         "",
         "This manifest was generated from the Python environment used to build this Windows package.",
-        "Package metadata is a starting point; review the exact Qt modules and distribution terms before a public release.",
+        "PaperGet itself is licensed under MIT (see LICENSE). The bundled Qt for Python",
+        "libraries are separate components offered here under LGPLv3. Their copyright and",
+        "license notices are retained below and in licenses/Qt/.",
         "",
         "| Component | Version | License metadata | Included text |",
         "| --- | --- | --- | --- |",
@@ -73,6 +75,7 @@ def write_notices(destination: Path) -> None:
         f"https://download.qt.io/official_releases/qt/{qt_minor}/{qt_version}/",
         "This ZIP contains shared Qt libraries and PySide6 extension modules as separate files.",
         "After unpacking, users can replace them with ABI-compatible modified builds and run PaperGet.exe.",
+        "The application does not prohibit reverse engineering for debugging such modifications.",
         "PaperGet application source: https://github.com/Godwu155/sci-hub-tool",
         "",
     ))

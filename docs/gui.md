@@ -66,7 +66,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1 
 - 全新 CLI-only 虚拟环境安装后可运行 `paperget --help`，其中没有 PySide6。
 - Windows 独立程序已启动验证，运行时工作目录不同于仓库且未设置 `PYTHONPATH`。ZIP 分发包 SHA-256：`EE8EEC0DA004C508D7AE216126E0F366E522C8B3DCB57D02866F87E19C8C9734`。
 
-此版的跨机器完整下载验收结果见下方记录；不同网络错误场景仍待补充，作为 v0.3 正式发布门槛。
+此版的跨机器完整下载验收结果见下方记录；后续 `dev4` 的限流与超时修复、正式版交付证据见 [发布记录](release-readiness.md)。
 
 ## 2026-10-11 开发预览验证
 
@@ -78,3 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1 
 ## 2026-10-12 跨机器验收反馈
 
 用户确认在另一台电脑使用 `PaperGet-windows-v0.3.0.dev1.zip`，完整下载、中文显示、设置保存和批量下载均正常。Windows 具体版本未记录；此反馈未覆盖缩放比例、断网、403/429、错误 PDF 和不可写目录等边界情况。正式发布前的剩余核对见 [发布准备记录](release-readiness.md)。
+
+## 2026-10-13 发布验收
+
+用户确认后续版本的程序均已验收、可正常下载，并授权发布正式版。`dev4` 解决限流重试造成的长时间“下载中”：429 直接跳过，单个 PDF 下载约 180 秒超时；相关错误路径由自动化测试覆盖。不同缩放比例与深色模式未取得逐项跨机器记录，因此不把它们列为已单独人工通过的项目。正式版包和校验值见 [发布说明](release-v0.3.0.md)。
