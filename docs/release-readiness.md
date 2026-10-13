@@ -7,6 +7,7 @@
 - Python 3.12.15 + Nuitka 4.1.1 + Zig 构建的 `0.3.0.dev2` Windows 程序在本机正常图形模式下持续运行；Python 3.13 的同源构建仍会崩溃。构建脚本现检查解释器版本并显式启用 Zig。
 - GUI 运行依赖改为 PySide6 Essentials。全新 Python 3.12 环境安装最小依赖后，57 项测试通过；独立包去除未使用的 `qpdf.dll` 后仍可启动，包内不含 Qt PDF 核心库和 Qt Virtual Keyboard。
 - 已从候选构建生成 `dist/PaperGet-windows-v0.3.0.dev2.zip`（33,324,737 字节，82 个条目），SHA-256 `FA405D3C73B235980944E6688AA4E26123129A40D5796C5BE222F0566216683D`。ZIP 含 `PaperGet.exe`、MIT `LICENSE`、`THIRD_PARTY_NOTICES.md`、GNU LGPLv3/GPLv3 文本；从 ZIP 解压到独立目录后，以 `C:\Windows\Temp` 为工作目录启动并持续运行 7 秒。本机 Windows 版本 `10.0.26200.0`。
+- 使用相同 Python 3.12 环境运行 CLI：`paperget get 10.1371/journal.pone.0000001 --output .tmp\dev2-open-download --json`，返回 `downloaded`，来源 OpenAlex、版本 `publishedVersion`；生成按论文标题命名的 816,502 字节文件，文件头为 `%PDF-`，SHA-256 `22f2423f45940809cc040415b5045a707b907fddec6a0c43bea16ac6455c72b0`。该项验证源码运行路径，独立 GUI 包的完整下载仍待跨机器验收。
 - 上述证据仅覆盖本机启动与自动化测试。仍需由另一台 Windows 电脑验收 dev2 的完整下载、批量、设置和中文显示。正式公开发布前仍须复核 Qt LGPL 分发义务与第三方告知文本。[Qt 官方说明](https://www.qt.io/development/open-source-lgpl-obligations)要求提供 LGPL 文本、显著告知及库源码获取方式等；当前候选包已包含文本和官方源码入口，但不能视为完整合规结论。
 
 ## 2026-10-12 暂停点
