@@ -46,15 +46,6 @@ ERROR = {
     "too_large": "PDF 超过设置的大小上限",
 }
 
-DEFAULT_SCIHUB_URL = "https://sci-hub.al/"
-SCIHUB_MIRRORS = (
-    ("sci-hub.al", DEFAULT_SCIHUB_URL),
-    ("sci-hub.mk", "https://sci-hub.mk/"),
-    ("sci-hub.vg", "https://sci-hub.vg/"),
-    ("sci-hub.ee（待验证）", "https://sci-hub.ee/"),
-    ("sci-hub.st（待验证）", "https://sci-hub.st/"),
-)
-
 
 def _item(value: object) -> QTableWidgetItem:
     cell = QTableWidgetItem(str(value) if value is not None else "")
@@ -82,11 +73,11 @@ def _default_output() -> str:
 
 def _config(settings: QSettings) -> Config:
     output = Path(str(settings.value("output_dir", _default_output())))
-    scihub_enabled = settings.value("scihub_enabled", True, type=bool)
-    scihub_url = str(settings.value("scihub_url", DEFAULT_SCIHUB_URL)).strip() if scihub_enabled else ""
-    order = tuple(str(settings.value("source_order", "scihub,openalex")).split(","))
+    scihub_enabled = settings.value("scihub_enabled", False, type=bool)
+    scihub_url = str(settings.value("scihub_url", "")).strip() if scihub_enabled else ""
+    order = tuple(str(settings.value("source_order", "openalex,scihub")).split(","))
     if len(order) != 2 or set(order) != {"openalex", "scihub"}:
-        order = ("scihub", "openalex")
+        order = ("openalex", "scihub")
     return Config.from_env(
         output_dir=output,
         openalex_api_key=get_openalex_key() or os.getenv("OPENALEX_API_KEY") or None,
@@ -104,7 +95,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("设置")
-        self.resize(600, 400)
+        self.resize(600, 360)
         layout = QVBoxLayout(self)
         form = QFormLayout()
         output_row = QHBoxLayout()
@@ -141,23 +132,14 @@ class SettingsDialog(QDialog):
         self.source_order = QComboBox()
         self.source_order.addItem("开放来源优先", "openalex,scihub")
         self.source_order.addItem("Sci-Hub 优先", "scihub,openalex")
-        current_order = str(settings.value("source_order", "scihub,openalex"))
+        current_order = str(settings.value("source_order", "openalex,scihub"))
         self.source_order.setCurrentIndex(1 if current_order == "scihub,openalex" else 0)
         form.addRow("来源顺序", self.source_order)
-        self.scihub = QCheckBox("启用实验性 Sci-Hub 来源")
-        self.scihub.setChecked(settings.value("scihub_enabled", True, type=bool))
-        form.addRow("Sci-Hub 来源", self.scihub)
-        self.scihub_url = QLineEdit(str(settings.value("scihub_url", DEFAULT_SCIHUB_URL)))
+        self.scihub = QCheckBox("启用实验性 Sci-Hub 后备来源")
+        self.scihub.setChecked(settings.value("scihub_enabled", False, type=bool))
+        form.addRow("后备来源", self.scihub)
+        self.scihub_url = QLineEdit(str(settings.value("scihub_url", "")))
         self.scihub_url.setPlaceholderText("https://…")
-        self.scihub_mirror = QComboBox()
-        for label, url in SCIHUB_MIRRORS:
-            self.scihub_mirror.addItem(label, url)
-        saved_url = self.scihub_url.text().strip()
-        self.scihub_mirror.setCurrentIndex(self.scihub_mirror.findData(saved_url))
-        self.scihub_mirror.currentIndexChanged.connect(self._select_scihub_mirror)
-        self.scihub_mirror.setEnabled(self.scihub.isChecked())
-        self.scihub.toggled.connect(self.scihub_mirror.setEnabled)
-        form.addRow("镜像候选", self.scihub_mirror)
         self.scihub_url.setEnabled(self.scihub.isChecked())
         self.scihub.toggled.connect(self.scihub_url.setEnabled)
         form.addRow("Sci-Hub 入口", self.scihub_url)
@@ -174,10 +156,6 @@ class SettingsDialog(QDialog):
         path = QFileDialog.getExistingDirectory(self, "选择下载目录", self.output.text())
         if path:
             self.output.setText(path)
-
-    def _select_scihub_mirror(self, index: int) -> None:
-        if index >= 0:
-            self.scihub_url.setText(str(self.scihub_mirror.itemData(index)))
 
     def _mark_key_for_clear(self) -> None:
         self.openalex_key.clear()

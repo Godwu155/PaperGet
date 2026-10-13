@@ -23,7 +23,7 @@ GUI 直接调用 `PaperGetService.search_title()`、`fetch(inspect=True)`、`fet
 
 ## 设置与来源
 
-非敏感偏好通过 `QSettings` 保存：输出目录、大小上限、来源顺序、Crossref 联系邮箱和 Sci-Hub 开关/入口。新安装默认启用 Sci-Hub、预填 `https://sci-hub.al/` 并将其排在 OpenAlex 前面；已有用户保存的设置优先。镜像下拉框提供 `.al`、`.mk`、`.vg`、`.ee`、`.st` 的 HTTPS 地址，选择时填入可编辑入口；`.ee` 和 `.st` 尚未验证，程序不会自动切换镜像。GUI 的 OpenAlex Key 使用 Windows 凭据管理器保存，不写入 `QSettings`；如果系统凭据不可用，仅保存在当前进程内存中，并向用户说明。环境变量仍可作为回退来源。已有站点限制按服务层状态呈现；界面不处理验证码或访问限制。
+非敏感偏好通过 `QSettings` 保存：输出目录、大小上限、来源顺序、Crossref 联系邮箱和 Sci-Hub 开关/入口。OpenAlex 默认优先；Sci-Hub 需要显式启用并填写 HTTPS 地址。GUI 的 OpenAlex Key 使用 Windows 凭据管理器保存，不写入 `QSettings`；如果系统凭据不可用，仅保存在当前进程内存中，并向用户说明。环境变量仍可作为回退来源。已有站点限制按服务层状态呈现；界面不处理验证码或访问限制。
 
 下载文件名由论文标题及 DOI 的 12 位哈希组成，清理 Windows 禁用字符和控制字符，并限制标题长度；Crossref 标题缺失时尝试 OpenAlex 标题，仍缺失则退回旧版 DOI 文件名。数据库记录路径和同一输出目录中的旧版 DOI 文件名继续用于检测已下载文件，避免重复下载。旧文件不自动更名。
 
