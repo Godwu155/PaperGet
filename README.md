@@ -2,7 +2,7 @@
 
 项目代码采用 [MIT 许可证](LICENSE)；Windows 分发包另含第三方组件清单和可用的许可文本。
 
-输入 DOI 或论文标题，查找开放获取的 PDF，并将下载结果记录在本地。提供命令行、Windows 图形界面开发版和 Python API。默认从 OpenAlex 获取开放副本；Sci-Hub 是需要显式配置、且可能不可用的实验性后备来源。
+输入 DOI 或论文标题，查找 PDF，并将下载结果记录在本地。提供命令行、Windows 图形界面开发版和 Python API。图形界面新安装默认先尝试 Sci-Hub，再尝试 OpenAlex；命令行仍默认使用开放来源，Sci-Hub 需显式配置。
 
 ## 安装
 
@@ -23,7 +23,7 @@ GUI 使用 PySide6 Essentials 和系统凭据管理器，作为可选依赖安�
 .venv\Scripts\paperget-gui
 ```
 
-在主窗口输入 DOI 可直接检查来源；输入部分标题则列出候选论文，选中并核对 DOI 后点击“获取 PDF”。下方可导入 TXT/CSV，先预览并去重，再加入串行队列；支持暂停队列、重试失败项、查看历史及导出 JSON/CSV。设置中可调整下载目录、来源顺序、出版版偏好与大小上限，也可填写 OpenAlex API Key 和 Crossref 联系邮箱。Windows 上的 Key 保存在凭据管理器，不写入普通设置文件；若凭据管理器不可用，输入的 Key 仅在本次运行中有效。环境变量 `OPENALEX_API_KEY` 和 `CROSSREF_MAILTO` 仍可使用。Sci-Hub 默认关闭，只有在设置中主动启用并填写 HTTPS 入口后才作为后备来源。
+在主窗口输入 DOI 可直接检查来源；输入部分标题则列出候选论文，选中并核对 DOI 后点击“获取 PDF”。下方可导入 TXT/CSV，先预览并去重，再加入串行队列；支持暂停队列、重试失败项、查看历史及导出 JSON/CSV。设置中可调整下载目录、来源顺序、出版版偏好与大小上限，也可填写 OpenAlex API Key 和 Crossref 联系邮箱。Windows 上的 Key 保存在凭据管理器，不写入普通设置文件；若凭据管理器不可用，输入的 Key 仅在本次运行中有效。环境变量 `OPENALEX_API_KEY` 和 `CROSSREF_MAILTO` 仍可使用。新安装的图形界面已启用 Sci-Hub，入口预填 `https://sci-hub.al/`，并提供 `.mk`、`.vg`、`.ee`、`.st` 的 HTTPS 镜像候选；后两者尚未验证。选择镜像只会替换入口地址，不会自动轮换。已保存的开关、顺序和自定义地址会保留。
 
 下载与网络操作在后台运行；当前显示阶段状态，不显示无法核实的下载百分比。等待中的批量任务可移除；暂停在当前任务结束后生效，仅对本次运行的队列有效。正在进行的网络任务需等其结束后关闭窗口。界面实施与验收细节见 [GUI 开发说明](docs/gui.md)，正式版剩余工作见 [发布准备记录](docs/release-readiness.md)。
 

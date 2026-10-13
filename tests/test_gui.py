@@ -10,7 +10,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from PySide6.QtCore import QSettings
     from PySide6.QtWidgets import QApplication, QLabel
-    from paperget.gui_window import BatchPreviewDialog, MainWindow, SettingsDialog, _config
+    from paperget.gui_window import (
+        DEFAULT_SCIHUB_URL, SCIHUB_MIRRORS, BatchPreviewDialog, MainWindow,
+        SettingsDialog, _config,
+    )
     from paperget.gui_backend import Task
 except ImportError:
     QApplication = None
@@ -39,19 +42,23 @@ class GuiSmokeTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("GUI worker did not finish")
 
-    def test_gui_settings_require_explicit_scihub_enable(self):
+    def test_gui_defaults_to_scihub_and_preserves_saved_preferences(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             settings = QSettings(str(Path(directory) / "settings.ini"), QSettings.IniFormat)
             with patch.dict(os.environ, {"SCIHUB_BASE_URL": "https://example.org/"}):
+                config = _config(settings)
+                self.assertEqual(config.scihub_base_url, DEFAULT_SCIHUB_URL)
+                self.assertEqual(config.source_order, ("scihub", "openalex"))
+                settings.setValue("scihub_enabled", False)
                 config = _config(settings)
                 self.assertIsNone(config.scihub_base_url)
                 self.assertEqual(config.source_order, ("openalex",))
                 settings.setValue("scihub_enabled", True)
                 settings.setValue("scihub_url", "https://example.org/")
-                settings.setValue("source_order", "scihub,openalex")
+                settings.setValue("source_order", "openalex,scihub")
                 config = _config(settings)
                 self.assertEqual(config.scihub_base_url, "https://example.org/")
-                self.assertEqual(config.source_order, ("scihub", "openalex"))
+                self.assertEqual(config.source_order, ("openalex", "scihub"))
             settings.sync()
             del settings
 
@@ -75,6 +82,29 @@ class GuiSmokeTests(unittest.TestCase):
             self.app.processEvents()
             settings.sync()
             del dialog, settings
+
+    def test_settings_dialog_prefills_https_mirrors_and_keeps_custom_url(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            settings = QSettings(str(Path(directory) / "settings.ini"), QSettings.IniFormat)
+            dialog = SettingsDialog(settings, None)
+            self.assertTrue(dialog.scihub.isChecked())
+            self.assertEqual(dialog.scihub_url.text(), DEFAULT_SCIHUB_URL)
+            self.assertEqual(dialog.source_order.currentData(), "scihub,openalex")
+            self.assertEqual(
+                [dialog.scihub_mirror.itemData(i) for i in range(dialog.scihub_mirror.count())],
+                [url for _, url in SCIHUB_MIRRORS],
+            )
+            dialog.scihub_mirror.setCurrentIndex(1)
+            self.assertEqual(dialog.scihub_url.text(), "https://sci-hub.mk/")
+            dialog.deleteLater()
+            self.app.processEvents()
+
+            settings.setValue("scihub_url", "https://custom.example/")
+            dialog = SettingsDialog(settings, None)
+            self.assertEqual(dialog.scihub_mirror.currentIndex(), -1)
+            self.assertEqual(dialog.scihub_url.text(), "https://custom.example/")
+            dialog.deleteLater()
+            self.app.processEvents()
 
     def test_settings_rejects_file_path_and_non_https_source(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
