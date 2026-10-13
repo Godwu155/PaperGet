@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import requests
 
@@ -71,6 +72,17 @@ class DownloaderTests(unittest.TestCase):
             with self.assertRaises(PaperGetError) as raised:
                 Downloader(InterruptedHttp()).download("https://example.org/a.pdf", path)
             self.assertEqual(raised.exception.code, "connection_error")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_download_time_limit_removes_partial_file(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            path = Path(directory) / "article.pdf"
+            with patch("paperget.downloader.time.monotonic", side_effect=[0, 0, 2]):
+                with self.assertRaises(PaperGetError) as raised:
+                    Downloader(Http(b"%PDF-1.7\nbody"), max_seconds=1).download(
+                        "https://example.org/a.pdf", path
+                    )
+            self.assertEqual(raised.exception.code, "timeout")
             self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_unwritable_destination_reports_disk_error_before_network(self):

@@ -91,6 +91,22 @@ class ServiceTests(unittest.TestCase):
                 self.assertTrue(any(row["stage"] == "download" and row["status"] == "downloaded"
                                     for row in events))
 
+    def test_rate_limited_candidate_is_skipped_for_another_host(self):
+        class RateLimited(Http):
+            def get(self, url, **kwargs):
+                if url.endswith("first.pdf"):
+                    raise PaperGetError("rate_limited", "HTTP 429; retry later")
+                return super().get(url, **kwargs)
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            with PaperGetService(Config(output_dir=Path(directory)), http=RateLimited()) as service:
+                result = service.fetch(DOI)
+                self.assertEqual((result.status, result.source), ("downloaded", "openalex"))
+                events = service.store.diagnostics(DOI)
+                self.assertTrue(any(row["error_code"] == "rate_limited" for row in events))
+                self.assertTrue(any(row["stage"] == "download" and row["status"] == "downloaded"
+                                    for row in events))
+
     def test_import_local_pdf_validates_and_records_manual_source(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             root = Path(directory)

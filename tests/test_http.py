@@ -43,13 +43,28 @@ class HttpTests(unittest.TestCase):
                 )
         self.assertEqual(raised.exception.code, "connection_error")
 
-    def test_429_retries_after_header(self):
-        limited = Response(429, {"Retry-After": "0"})
-        session = Session([limited, Response(200)])
-        response = HttpClient(session, min_interval=0).get("https://example.org/paper.pdf")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(session.calls, 2)
+    def test_429_skips_without_waiting_or_retrying(self):
+        limited = Response(429, {"Retry-After": "900"})
+        session = Session([limited])
+        with patch("paperget.http.time.sleep") as sleep:
+            with self.assertRaises(PaperGetError) as raised:
+                HttpClient(session, min_interval=0).get("https://example.org/paper.pdf")
+        self.assertEqual(raised.exception.code, "rate_limited")
+        self.assertIn("900s", str(raised.exception))
+        self.assertEqual(session.calls, 1)
+        sleep.assert_not_called()
         self.assertTrue(limited.closed)
+
+    def test_long_server_retry_after_skips_without_waiting(self):
+        unavailable = Response(503, {"Retry-After": "900"})
+        session = Session([unavailable])
+        with patch("paperget.http.time.sleep") as sleep:
+            with self.assertRaises(PaperGetError) as raised:
+                HttpClient(session, min_interval=0).get("https://example.org/paper.pdf")
+        self.assertEqual(raised.exception.code, "server_error")
+        self.assertEqual(session.calls, 1)
+        sleep.assert_not_called()
+        self.assertTrue(unavailable.closed)
 
     def test_429_exhausted_reports_rate_limit(self):
         limited = Response(429)

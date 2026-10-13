@@ -42,7 +42,9 @@ $arguments = @(
     '--include-package-data=paperget',
     '--include-module=keyring.backends.Windows',
     '--noinclude-qt-translations',
-    '--windows-console-mode=disable',
+    # Nuitka 4.1.1's disable mode can fail at startup with codeobject.c:356.
+    # Attach uses an existing console without opening one from Explorer.
+    '--windows-console-mode=attach',
     "--windows-icon-from-ico=$iconPath",
     '--assume-yes-for-downloads',
     '--output-filename=PaperGet.exe',

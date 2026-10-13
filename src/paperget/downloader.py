@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import tempfile
+import time
 import unicodedata
 from pathlib import Path
 
@@ -55,20 +56,24 @@ def filename_for_paper(title: str, doi: str) -> str:
 
 
 class Downloader:
-    def __init__(self, http: HttpClient, max_pdf_mb: int = 100):
+    def __init__(self, http: HttpClient, max_pdf_mb: int = 100, max_seconds: int = 180):
         self.http = http
         self.max_bytes = max_pdf_mb * 1024 * 1024
+        self.max_seconds = max_seconds
 
     def download(self, url: str, destination: Path, *, force=False) -> str:
         if destination.exists() and not force and pdf_is_valid(destination):
             return self._hash(destination)
+        deadline = time.monotonic() + self.max_seconds
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise PaperGetError("disk_error", str(exc)) from exc
-        response = self.http.get(url, stream=True)
+        response = self.http.get(url, stream=True, retries=1)
         temp: Path | None = None
         try:
+            if time.monotonic() >= deadline:
+                raise PaperGetError("timeout", "PDF download exceeded time limit")
             if response.status_code == 404:
                 raise PaperGetError("not_found", "PDF URL returned HTTP 404")
             length = response.headers.get("Content-Length")
@@ -88,6 +93,8 @@ class Downloader:
                 size = 0
                 first = bytearray()
                 for chunk in response.iter_content(chunk_size=65536):
+                    if time.monotonic() >= deadline:
+                        raise PaperGetError("timeout", "PDF download exceeded time limit")
                     if not chunk:
                         continue
                     size += len(chunk)

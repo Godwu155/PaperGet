@@ -43,14 +43,21 @@ class HttpClient:
             except requests.RequestException as exc:
                 raise PaperGetError("connection_error", str(exc)) from exc
 
-            if response.status_code in {429, 500, 502, 503, 504}:
-                if attempt == retries:
-                    code = "rate_limited" if response.status_code == 429 else "server_error"
-                    response.close()
-                    raise PaperGetError(code, f"HTTP {response.status_code} from {host}")
+            if response.status_code == 429:
                 wait = self._retry_after(response.headers.get("Retry-After"))
                 response.close()
-                time.sleep(wait if wait is not None else min(2**attempt + random.random(), 30))
+                detail = f"; retry after {int(wait)}s" if wait is not None else ""
+                raise PaperGetError("rate_limited", f"HTTP 429 from {host}{detail}")
+            if response.status_code in {500, 502, 503, 504}:
+                wait = self._retry_after(response.headers.get("Retry-After"))
+                if attempt == retries:
+                    response.close()
+                    raise PaperGetError("server_error", f"HTTP {response.status_code} from {host}")
+                if wait is not None and wait > 10:
+                    response.close()
+                    raise PaperGetError("server_error", f"HTTP {response.status_code} from {host}; retry later")
+                response.close()
+                time.sleep(wait if wait is not None else min(2**attempt + random.random(), 10))
                 continue
             if response.status_code == 403:
                 response.close()
@@ -67,10 +74,10 @@ class HttpClient:
         if not value:
             return None
         try:
-            return min(max(float(value), 0.0), 300.0)
+            return max(float(value), 0.0)
         except ValueError:
             try:
                 date = parsedate_to_datetime(value)
-                return min(max((date - datetime.now(timezone.utc)).total_seconds(), 0.0), 300.0)
+                return max((date - datetime.now(timezone.utc)).total_seconds(), 0.0)
             except (TypeError, ValueError, OverflowError):
                 return None
